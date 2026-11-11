@@ -172,7 +172,7 @@ class Window(QMainWindow):
         title=QLabel('自定义猫咪 · 出征工作台');title.setObjectName('heading');root.addWidget(title)
         description=QLabel('基础属性全 7  ·  左侧可加多只自定义猫（最多 '+str(MAX_CATS)+' 只），启用几只就生成几只  ·  职业与技能不受存档解锁限制  ·  悬停查看效果');root.addWidget(description)
         toolbar=QHBoxLayout();root.addLayout(toolbar);self.title=QLineEdit('我的出征方案');self.title.setPlaceholderText('给这次配置起个名字');toolbar.addWidget(self.title,1)
-        for text,fn in [('保存方案',self.save_preset),('载入方案',self.load_preset),('查看出征日记',self.open_journal),('刷新存档',lambda:self.call({'action':'status'},self.status_received)),('解锁全部职业与技能',self.unlock_all),('NPC 交猫直接完成',self.donate_all)]:
+        for text,fn in [('保存方案',self.save_preset),('载入方案',self.load_preset),('查看出征日记',self.open_journal),('刷新存档',lambda:self.call({'action':'status'},self.status_received)),('解锁全部职业与技能',self.unlock_all),('NPC 交猫直接完成',self.donate_all),('完成主线交付',self.deliver_main_quest)]:
             b=QPushButton(text);b.clicked.connect(fn);toolbar.addWidget(b)
         self.helper_button=QPushButton('启动 F3 助手');self.helper_button.setToolTip('常驻补满 NPC 捐献（等于交够猫，不消耗猫）。不随机启动，需要时点这里。');self.helper_button.clicked.connect(self.toggle_helper);toolbar.addWidget(self.helper_button)
         self.refresh_helper_button()
@@ -352,6 +352,17 @@ class Window(QMainWindow):
     def donate_all(self):
         answer=QMessageBox.question(self,'NPC 交猫直接完成','将把各 NPC 的捐献进度直接补到目标值，等于你已经交够了猫和物品。游戏里再去找他们（布恩县的豆博士等）就能领对应奖励，过程中不会消耗任何猫咪。\n只改 NPC 进度，不动猫咪、装备和金币；操作前自动备份。\n\n请确认游戏已保存并退出。继续？',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
         if answer==QMessageBox.Yes:self.call({'action':'donate'},self.donated)
+    def deliver_main_quest(self):
+        box=QMessageBox(self);box.setWindowTitle('完成主线交付');box.setText('直接完成主线道具交付（相当于已经把道具送到地点交掉）。\n\n· 腐臭水蛭 → 白骨墓园 · 搏动动脉\n· 搏动软骨 → 洞窟 · 肉墙\n\n两半都交齐会解锁肉世界（Meat World）。只改任务标记，不动猫咪、装备和金币，写入前自动备份。\n\n请确认游戏已保存并退出。')
+        leech=box.addButton('只交腐臭水蛭',QMessageBox.AcceptRole)
+        both=box.addButton('两个都交（解锁肉世界）',QMessageBox.AcceptRole)
+        box.addButton('取消',QMessageBox.RejectRole)
+        box.exec()
+        clicked=box.clickedButton()
+        if clicked is leech:self.call({'action':'mainquest','deliveries':['leech']},self.delivered_main)
+        elif clicked is both:self.call({'action':'mainquest','deliveries':['leech','gristle']},self.delivered_main)
+    def delivered_main(self,result):
+        QMessageBox.information(self,'已完成','主线交付：'+result.get('message','')+'\n\n备份位置：'+result['backup']);self.call({'action':'status'},self.status_received)
     def donated(self,result):
         QMessageBox.information(self,'已完成',result['message']+'\n\n备份位置：'+result['backup']);self.call({'action':'status'},self.status_received)
     def helper_pid(self):

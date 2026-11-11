@@ -186,13 +186,41 @@ def donate_direct(backup=True):
             raise
     return {'ok':False,'changed':False,'message':'存档被游戏占用，稍后自动重试：'+last}
 
+MAIN_DELIVERIES={
+    'leech':{'name':'腐臭水蛭 → 白骨墓园 · 搏动动脉','tokens':{'MeatWorldQuest_Leech':1,'mapflag_ThrobbingArteryDone':1}},
+    'gristle':{'name':'搏动软骨 → 洞窟 · 肉墙','tokens':{'MeatWorldQuest_Gristle':1,'mapflag_WallOfFleshDone':1}},
+}
+def deliver_main(se,stage,keys):
+    keys=[key for key in keys if key in MAIN_DELIVERIES]
+    if not keys:raise ValueError('没有选择要完成的主线交付。')
+    tokens={}
+    for key in keys:tokens.update(MAIN_DELIVERIES[key]['tokens'])
+    if {'leech','gristle'}<=set(keys):tokens['mapflag_MeatWorldUnlocked']=1
+    with closing(sqlite3.connect(stage)) as c:before=engine.snap(c)
+    existing=set(before['properties'])
+    updates={key:value for key,value in tokens.items() if key in existing}
+    inserts={key:value for key,value in tokens.items() if key not in existing}
+    se.save_all_changes(stage,prop_updates=updates or None,prop_inserts=inserts or None)
+    with closing(sqlite3.connect(stage)) as c:
+        props=se.get_properties(c);after=engine.snap(c)
+        for key,value in tokens.items():assert props.get(key)==value,key
+        assert before['cats']==after['cats'] and before['furniture']==after['furniture'] and before['winning_teams']==after['winning_teams']
+        assert {k:v for k,v in before['files'].items()}=={k:v for k,v in after['files'].items()}
+        ignore={'save_editor_name','save_editor_version','save_editor_tables_touched'}
+        assert {k:v for k,v in before['properties'].items() if k not in tokens and k not in ignore}=={k:v for k,v in after['properties'].items() if k not in tokens and k not in ignore}
+        assert c.execute('pragma integrity_check').fetchone()[0]=='ok'
+    names='、'.join(MAIN_DELIVERIES[key]['name'] for key in keys)
+    message=f'已完成主线交付：{names}；'
+    message+='两半都交齐，肉世界（Meat World）已解锁。' if 'mapflag_MeatWorldUnlocked' in tokens else '另一半交完还会解锁肉世界。'
+    return {'deliveries':keys,'message':message}
+
 def operate(req):
     action=req.get('action','status')
     if action=='status':return status()
     engine.closed();se,cb,hu=engine.api();sp=Path(CONFIG['save']);info=status()
     if info['onAdventure']:raise ValueError('请先结束冒险回家、保存并退出游戏。')
     cats=validate(req.get('cats',[]),info['unlocked'],info['rooms']) if action=='generate' else []
-    if action not in ['generate','clear','unlock','donate']:raise ValueError('不支持的操作。')
+    if action not in ['generate','clear','unlock','donate','mainquest']:raise ValueError('不支持的操作。')
     oldhash=hashlib.sha256(sp.read_bytes()).hexdigest();stamp=datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f');backup=Path(CONFIG['backupRoot'])/stamp;backup.mkdir(parents=True)
     with closing(sqlite3.connect(sp.as_uri()+'?mode=ro',uri=True)) as src,closing(sqlite3.connect(backup/sp.name)) as dst:src.backup(dst)
     fd,temp=tempfile.mkstemp(prefix='cat-workbench-',suffix='.sav',dir=sp.parent);os.close(fd);stage=Path(temp);shutil.copy2(backup/sp.name,stage)
@@ -200,6 +228,7 @@ def operate(req):
     try:
         if action=='unlock':result=unlock_all(se,stage)
         elif action=='donate':result=donate_complete(stage)
+        elif action=='mainquest':result=deliver_main(se,stage,req.get('deliveries') or [])
         else:
             with closing(sqlite3.connect(stage)) as c:
                 before=engine.snap(c);day=int(se.get_properties(c)['current_day'])
