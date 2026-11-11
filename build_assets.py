@@ -144,6 +144,17 @@ for k,b in groups['classes'].items():
  if not isinstance(b,dict):continue
  meta=b.get('meta',{}) if isinstance(b.get('meta'),dict) else {};symbol=ui.sym.get('FontIcon_'+k.lower()) or ui.sym.get('FontIcon_'+k) or (ui.sym.get('FontIcon_Cleric') if k=='Medic' else None)
  result['classes'].append({'id':k.lower(),'name':tr(meta.get('name'),k),'description':tr(meta.get('description') or meta.get('desc'),'无职业没有项圈职业加成。' if k.lower()=='colorless' else ''),'image':icon(ui,symbol,0,'class-'+k)})
+class_colors={'fighter':'#b44545','hunter':'#427b52','mage':'#7353ae','medic':'#a36b25','tank':'#82623f','thief':'#535b8c','colorless':'#5d7184','monk':'#ad7b33','butcher':'#a04852','necromancer':'#80588b','druid':'#3c8273','tinkerer':'#557786','psychic':'#9b5b94','jester':'#a35a7e'}
+from PySide6.QtGui import QColor
+from PySide6.QtCore import QRect
+for entry in result['classes']:
+ if not entry['image'] or not (ROOT/entry['image']).is_file():continue
+ glyph_source=QImage(str(ROOT/entry['image']));assert not glyph_source.isNull(),entry['id']
+ tile_glyph=QImage(glyph_source.size(),QImage.Format_ARGB32_Premultiplied);tile_glyph.fill(Qt.transparent)
+ painter=QPainter(tile_glyph);painter.drawImage(0,0,glyph_source);painter.setCompositionMode(QPainter.CompositionMode_SourceIn);painter.fillRect(tile_glyph.rect(),QColor('white'));painter.end()
+ tile=QImage(100,100,QImage.Format_ARGB32_Premultiplied);tile.fill(Qt.transparent)
+ painter=QPainter(tile);painter.setRenderHint(QPainter.Antialiasing);painter.setPen(Qt.NoPen);painter.setBrush(QColor(class_colors.get(entry['id'],'#556b87')));painter.drawRoundedRect(1,1,98,98,15,15);painter.drawImage(QRect(14,14,72,72),tile_glyph);painter.end()
+ entry['image']='images/class-choice-'+entry['id']+'.png';assert tile.save(str(ROOT/entry['image']))
 partnames={'body':'body','head':'head','tail':'tail','leg':'legs','ear':'ears','eye':'eyes','eyebrow':'eyebrows','mouth_closed':'mouth','texture':'texture'}
 for folder,group in partnames.items():
  entries=groups['mutations'].get(group,{})
