@@ -78,6 +78,35 @@ for kind,symbol,group in [('actives','AbilityIcon','abilities'),('passives','Pas
   label=next((x for x in [str(meta.get('icon','')),str(b.get('icon','')),k,re.sub(r'\d+$','',k)] if x in frames),None)
   img=icon(ability,ability.sym[symbol],frames[label],kind+'-'+k) if label else ''
   result[kind].append(dict(entry,description=desc or '游戏未提供文字说明。',image=img))
+
+from ability_details import combat_summary
+templates = parse_gon(raw('data/ability_templates/ability_templates.gon').decode('utf-8-sig'))
+for entry in result['actives']:
+    summary = combat_summary(entry['id'], groups['abilities'], templates)
+    entry['combatSummary'] = summary
+    entry['description'] = summary + '\n' + entry['description']
+
+import core.cat_blob_editor as cb
+result['diseases'] = []
+disease_frames = ability.labels(ability.sym['PassiveIcon'])
+known_disorders = cb.DISORDER_PASSIVES | cb.BIRTH_DEFECT_PASSIVES
+for ident, definition in groups['passives'].items():
+    if not isinstance(definition, dict):
+        continue
+    if definition.get('class') != 'Disorder' and ident not in known_disorders:
+        continue
+    label = next((candidate for candidate in [definition.get('icon'), ident] if candidate in disease_frames), None)
+    picture = icon(ability, ability.sym['PassiveIcon'], disease_frames[label], 'disease-' + ident) if label else ''
+    description = tr(definition.get('desc'), getattr(ad, 'ABILITY_DESCRIPTIONS', {}).get(ident, ''))
+    result['diseases'].append({
+        'id': ident,
+        'class': 'disorder',
+        'name': tr(definition.get('name'), ident),
+        'description': description or '游戏未提供文字说明。',
+        'image': picture,
+    })
+result['diseases'].sort(key=lambda entry: entry['name'])
+
 for k,b in groups['items'].items():
  if not isinstance(b,dict) or b.get('kind') not in ['head','face','neck','weapon','trinket']:continue
  kind=b['kind'];symbol={'head':'HeadItemIcon','face':'FaceItemIcon','neck':'NeckItemIcon','weapon':'WeaponIcon','trinket':'TrinketIcon'}[kind]
@@ -111,7 +140,7 @@ for folder,group in partnames.items():
    if not desc:desc=raw_effect
   combined='\n'.join(x for x in [stats_text,desc] if x) or '无额外属性效果。'
   result['mutations'][folder][str(k)]={'name':tr(b.get('name'),str(k)),'description':combined,'tag':b.get('tag','')}
-missing={kind:sum(not x['image'] for x in result[kind]) for kind in ['actives','passives','items','classes']}
+missing={kind:sum(not x['image'] for x in result[kind]) for kind in ['actives','passives','diseases','items','classes']}
 (ROOT/'workbench.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8');(ROOT/'asset-report.json').write_text(json.dumps({'icons':stats['rendered'],'missing':missing,'errors':stats['missing'][:20]},ensure_ascii=False,indent=2),encoding='utf-8')
 print(json.dumps({'icons':stats['rendered'],'missing':missing,'mutations':{k:len(v) for k,v in result['mutations'].items()}},ensure_ascii=False))
 

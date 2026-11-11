@@ -4,6 +4,7 @@ from contextlib import closing
 HERE=Path(__file__).resolve().parent
 sys.path.insert(0,str(HERE))
 import cat_engine as engine
+from skill_slots import SKILL_SLOTS
 CONFIG=engine.CONFIG
 DATA=json.loads((HERE/'workbench.json').read_text(encoding='utf-8'))
 ITEMS={x['id']:x for x in DATA['items']}
@@ -18,16 +19,24 @@ def status():
     return {'ok':True,'count':len(cats),'unlocked':unlocked,'rooms':list(rooms),'onAdventure':bool(props.get('on_adventure')),'questItems':inv['quest_items'],'save':str(sp)}
 
 def validate(cats,unlocked,rooms):
-    active={x['id']:x for x in DATA['actives']};passive={x['id']:x for x in DATA['passives']}
+    pools = {
+        kind: {entry['id']: entry for entry in DATA.get(kind, [])}
+        for kind in ['actives', 'passives', 'diseases']
+    }
     enabled=[x for x in cats if x.get('enabled',True)]
     if not 1<=len(enabled)<=4:raise ValueError('请启用 1～4 只猫咪。')
     for cat in enabled:
         if cat.get('room') not in rooms:raise ValueError('所选房间尚未开放。')
         if cat.get('gender') not in [0,1]:raise ValueError('请选择公猫或母猫。')
         if len(cat.get('name',''))>40:raise ValueError('猫名最多 40 个字符。')
-        for key,pool in [('active1',active),('active2',active),('passive',passive)]:
+        for key, spec in SKILL_SLOTS.items():
+            pool = pools[spec['kind']]
             selection=cat.get(key) or {};skill=selection.get('id');cls=selection.get('class','empty')
             if not skill:continue
+            if spec['kind'] == 'diseases':
+                if skill not in pool:
+                    raise ValueError('请选择疾病列表中的疾病，或留空。')
+                continue
             if skill not in pool or cls not in unlocked or pool[skill]['class'].casefold()!=cls:raise ValueError('技能必须来自所选已解锁职业的技能池。')
         for slot,key in enumerate(SLOTS):
             gear=cat.get('equipment',{}).get(key)
@@ -45,9 +54,24 @@ def make_blob(cb,cat,key,day):
     visual=cat['visual'];blob=edit(blob,cb.apply_mutation_edits,{part:visual[field] for part,field in PARTS.items()})
     blob=edit(blob,cb.apply_visual_globals_edit,palette=visual.get('palette',0),class_palette=visual.get('class_palette',4294967295),claws=visual.get('claws',0))
     for slot,kind in enumerate(SLOTS):blob=cb.apply_item_edit(blob,slot,cat.get('equipment',{}).get(kind) or 'None')
-    desired={f'ability_{i}':'None' for i in range(14)};a=(cat.get('active1') or {}).get('id') or 'None';b=(cat.get('active2') or {}).get('id') or 'None';p=(cat.get('passive') or {}).get('id') or 'None'
-    desired.update({'ability_0':'DefaultMove','ability_1':'BasicMelee','ability_2':a,'ability_3':b,'ability_6':a,'ability_7':b,'ability_10':p,'class':'Colorless','voice':'male11' if cat['gender']==0 else 'female54'})
-    parsed=cb.parse_cat_blob_full(blob);blob=cb.apply_all_edits(parsed,{x.index:desired[x.semantic] for x in parsed.string_fields if x.semantic in desired});blob=edit(blob,cb.apply_passive_tier_edit,10,1)
+    desired = {f'ability_{i}': 'None' for i in range(14)}
+    desired.update({
+        'ability_0': 'DefaultMove',
+        'ability_1': 'BasicMelee',
+        'class': 'Colorless',
+        'voice': 'male11' if cat['gender'] == 0 else 'female54',
+    })
+    for key, spec in SKILL_SLOTS.items():
+        ability = (cat.get(key) or {}).get('id') or 'None'
+        for slot in spec['slots']:
+            desired[f'ability_{slot}'] = ability
+    parsed = cb.parse_cat_blob_full(blob)
+    blob = cb.apply_all_edits(parsed, {
+        field.index: desired[field.semantic]
+        for field in parsed.string_fields if field.semantic in desired
+    })
+    for slot in range(10, 14):
+        blob = edit(blob, cb.apply_passive_tier_edit, slot, 1)
     blob=edit(blob,cb.apply_personality_edits,libido=1.0,sexuality=0.0,lover_key=0,hater_key=0,aggression=0.0,sociability=1.0,mood=1.0,affinity=1.0)
     blob=edit(blob,cb.apply_unretire);name=cat.get('name','').strip() or engine.draw_name(random.SystemRandom(),cat['gender']);blob=edit(blob,cb.apply_name_edit,name)
     detail=engine.api()[0].parse_cat_details(blob);assert detail['base_stats']==[7]*7 and not detail['retired']

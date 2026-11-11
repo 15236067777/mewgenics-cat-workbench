@@ -8,11 +8,12 @@ from PySide6.QtGui import QIcon,QPixmap,QDesktopServices,QPainter,QColor,QTextDo
 from PySide6.QtWidgets import QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QLabel,QPushButton,QCheckBox,QComboBox,QLineEdit,QTabWidget,QSplitter,QScrollArea,QDialog,QListWidget,QListWidgetItem,QAbstractItemView,QTextBrowser,QDialogButtonBox,QMessageBox,QFileDialog,QFrame,QGroupBox,QToolTip,QStyledItemDelegate,QStyle,QSizePolicy
 import core.cat_blob_editor as cb,core.cat_renderer as renderer,core.i18n as i18n
 import ui.gui_cat_customize_dialog as customize
+from skill_slots import SKILL_SLOTS
 CONFIG=json.loads((ROOT/'settings.json').read_text(encoding='utf-8-sig'))
 DATA=json.loads((ROOT/'workbench.json').read_text(encoding='utf-8-sig'))
 BASE=json.loads((ROOT/'catalog.json').read_text(encoding='utf-8-sig'))
 CLASSES={x['id']:x for x in DATA['classes']}
-SKILLS={x['id']:x for kind in ['actives','passives'] for x in DATA[kind]}
+SKILLS={x['id']:x for kind in ['actives','passives','diseases'] for x in DATA.get(kind,[])}
 ITEMS={x['id']:x for x in DATA['items']}
 ROOMS={'Floor1_Large':'一楼左','Floor1_Small':'一楼右','Floor2_Small':'二楼左','Floor2_Large':'二楼右','Attic':'阁楼'}
 KINDS={'head':'头部','face':'面部','neck':'颈部','weapon':'武器','trinket':'饰品'}
@@ -75,11 +76,13 @@ def picture_button(entry,empty='空（没有）'):
     return button
 def default_cat(i):
     blob=base64.b64decode(BASE['templates'][i%len(BASE['templates'])]);visual=dataclasses.asdict(cb.parse_cat_blob_full(blob).visual_data)
-    for field in ['texture','body','head','tail','leg_back_left','leg_back_right','arm_front_left','arm_front_right','eye_left','eye_right','eyebrow_left','eyebrow_right','ear_left','ear_right','mouth']:
-        if not 1<=visual[field]<300:visual[field]=1
-    for field in list(visual):
-        if field.endswith('_mut'):visual[field]=0
-    return {'enabled':i==0,'name':'','gender':i%2,'room':list(ROOMS)[i%4],'visual':visual,'active1':{'class':'empty','id':None},'active2':{'class':'empty','id':None},'passive':{'class':'empty','id':None},'equipment':{k:None for k in KINDS}}
+    for field in ['body','head','tail','leg_back_left','leg_back_right','arm_front_left','arm_front_right','ear_left','ear_right','eye_left','eye_right','eyebrow_left','eyebrow_right','mouth','texture']:
+        if visual.get(field, 0) < 1 or visual.get(field, 0) >= 300:
+            visual[field] = 1
+    for field in visual:
+        if field.endswith('_mut'):
+            visual[field] = 0
+    return {'enabled':i==0,'name':'','gender':i%2,'room':list(ROOMS)[i%4],'visual':visual,**{key:{'class':'empty','id':None} for key in SKILL_SLOTS},'equipment':{k:None for k in KINDS}}
 
 class Gallery(QDialog):
     def __init__(self,parent,title,entries,current=None,detail_rows=False):
@@ -173,7 +176,7 @@ class Window(QMainWindow):
         for i,cat in enumerate(self.cats):
             box=QFrame();box.setObjectName('selectedCard' if i==self.selected else 'catCard');layout=QVBoxLayout(box);check=QCheckBox(f'启用第 {i+1} 只');check.setChecked(cat['enabled']);check.toggled.connect(lambda value,n=i:self.set_enabled(n,value));layout.addWidget(check)
             button=QPushButton(cat.get('name') or f'第 {i+1} 只 · 官方随机名字');button.setIcon(QIcon(self.portrait(cat,82)));button.setIconSize(QSize(82,82));button.setMinimumHeight(86);button.clicked.connect(lambda checked=False,n=i:self.select_cat(n));layout.addWidget(button)
-            names=[SKILLS[x['id']]['name'] for key in ['active1','active2','passive'] if (x:=cat.get(key)) and x.get('id') in SKILLS];small=QLabel(' / '.join(names) if names else '技能留空');small.setWordWrap(True);layout.addWidget(small);self.side_layout.addWidget(box)
+            names=[SKILLS[x['id']]['name'] for key in SKILL_SLOTS if (x:=cat.get(key)) and x.get('id') in SKILLS];small=QLabel(' / '.join(names) if names else '技能与疾病留空');small.setWordWrap(True);layout.addWidget(small);self.side_layout.addWidget(box)
         self.side_layout.addStretch();count=sum(c.get('enabled',True) for c in self.cats);self.generate.setText(f'备份并生成 {count} 只猫咪')
     def set_enabled(self,n,value):self.cats[n]['enabled']=value;self.changed();self.generate.setText(f"备份并生成 {sum(c.get('enabled',True) for c in self.cats)} 只猫咪")
     def select_cat(self,n):self.selected=n;self.build_side();self.build_editor()
@@ -189,19 +192,31 @@ class Window(QMainWindow):
         room.setCurrentIndex(max(0,room.findData(cat['room'])));room.currentIndexChanged.connect(lambda i:self.update_cat('room',room.itemData(i)));row.addWidget(room);hint=QLabel('全 7 指基础属性；变异和装备仍会产生额外加成。');hint.setWordWrap(True);fields.addWidget(hint);self.editor_layout.addLayout(head)
         tabs=QTabWidget();self.editor_layout.addWidget(tabs);tabs.currentChanged.connect(lambda n:setattr(self,'tab_index',n) if not self.loading else None)
         skills=QWidget();skill_layout=QVBoxLayout(skills)
-        for key,label,kind in [('active1','主动技能 1','actives'),('active2','主动技能 2','actives'),('passive','被动技能','passives')]:
-            group=QGroupBox(label);grid=QGridLayout(group);grid.setContentsMargins(8,8,8,8);grid.setSpacing(5);combo=HoverCombo();combo.setIconSize(QSize(30,30));combo.addItem('空（没有该技能）','empty')
-            for cls in DATA['classes']:
-                if cls['id'] in self.info['unlocked']:
-                    combo.addItem(QIcon(image(cls['image'])),cls['name'],cls['id']);combo.setItemData(combo.count()-1,tooltip(cls),Qt.ToolTipRole)
-            combo.view().setMouseTracking(True);chosen=cat.get(key,{'class':'empty','id':None});combo.setCurrentIndex(max(0,combo.findData(chosen.get('class','empty'))));combo.currentIndexChanged.connect(lambda i,k=key,c=combo:self.set_skill_class(k,c.itemData(i)));combo.setFixedWidth(170);grid.addWidget(combo,0,0)
+        diseases=QWidget();disease_layout=QVBoxLayout(diseases)
+        for key, spec in SKILL_SLOTS.items():
+            label, kind = spec['label'], spec['kind']
+            group=QGroupBox(label);grid=QGridLayout(group);grid.setContentsMargins(8,8,8,8);grid.setSpacing(5)
+            chosen=cat.get(key) or {'class':'empty','id':None}
+            if kind == 'diseases':
+                category = QLabel('疾病 / 障碍')
+                category.setFixedWidth(170)
+                grid.addWidget(category,0,0)
+            else:
+                combo=HoverCombo();combo.setIconSize(QSize(30,30));combo.addItem('空（没有该技能）','empty')
+                for cls in DATA['classes']:
+                    if cls['id'] in self.info['unlocked']:
+                        combo.addItem(QIcon(image(cls['image'])),cls['name'],cls['id']);combo.setItemData(combo.count()-1,tooltip(cls),Qt.ToolTipRole)
+                combo.view().setMouseTracking(True);combo.setCurrentIndex(max(0,combo.findData(chosen.get('class','empty'))));combo.currentIndexChanged.connect(lambda i,k=key,c=combo:self.set_skill_class(k,c.itemData(i)));combo.setFixedWidth(170);grid.addWidget(combo,0,0)
             entry=SKILLS.get(chosen.get('id'));button=QPushButton();button.setObjectName('skillSquare');button.setFixedSize(68,68);button.setIconSize(QSize(58,58));button.setToolTip(tooltip(entry) if entry else '选择该职业的具体技能')
             if entry:button.setIcon(QIcon(image(entry.get('image',''))))
-            else:button.setText('选择' if chosen.get('class')!='empty' else '空')
-            button.setEnabled(chosen.get('class')!='empty');button.clicked.connect(lambda checked=False,k=key,t=kind:self.pick_skill(k,t));grid.addWidget(button,0,1)
-            text=('<b>'+html.escape(entry['name'])+'</b><br>'+html.escape(entry['description']).replace('\n','<br>')) if entry else ('先选具体技能，或留空。' if chosen.get('class')!='empty' else '没有该技能。')
-            desc=QLabel(text);desc.setTextFormat(Qt.RichText);desc.setWordWrap(True);desc.setToolTip(tooltip(entry) if entry else '');grid.addWidget(desc,0,2);grid.setColumnStretch(2,1);skill_layout.addWidget(group)
-        skill_layout.addStretch();tabs.addTab(skills,'技能')
+            else:button.setText('选择' if kind=='diseases' or chosen.get('class')!='empty' else '空')
+            button.setEnabled(kind=='diseases' or chosen.get('class')!='empty');button.clicked.connect(lambda checked=False,k=key,t=kind:self.pick_skill(k,t));grid.addWidget(button,0,1)
+            text=('<b>'+html.escape(entry['name'])+'</b><br>'+html.escape(entry['description']).replace('\n','<br>')) if entry else ('可选择疾病，也可留空。' if kind=='diseases' else '先选具体技能，或留空。' if chosen.get('class')!='empty' else '没有该技能。')
+            desc=QLabel(text);desc.setTextFormat(Qt.RichText);desc.setWordWrap(True);desc.setToolTip(tooltip(entry) if entry else '');grid.addWidget(desc,0,2);grid.setColumnStretch(2,1)
+            target_layout = disease_layout if kind=='diseases' else skill_layout
+            target_layout.addWidget(group)
+        skill_layout.addStretch();tabs.addTab(skills,'技能 · 4 主动 / 2 被动')
+        disease_layout.addStretch();tabs.addTab(diseases,'疾病 · 2')
         body=QWidget();bl=QVBoxLayout(body);bodybutton=QPushButton('打开部位图片面板 · 选择外观与变异');bodybutton.setMinimumHeight(55);bodybutton.clicked.connect(self.customize_body);bl.addWidget(bodybutton)
         summary=QLabel(self.mutation_summary(cat));summary.setWordWrap(True);bl.addWidget(summary);bl.addStretch();tabs.addTab(body,'部位 / 变异')
         equipment=QWidget();el=QGridLayout(equipment);el.setContentsMargins(4,4,4,4);el.setSpacing(8)
@@ -221,8 +236,16 @@ class Window(QMainWindow):
     def set_skill_class(self,key,cls):
         self.cats[self.selected][key]={'class':cls,'id':None};self.changed();self.build_editor()
     def pick_skill(self,key,kind):
-        cat=self.cats[self.selected];pool=[x for x in DATA[kind] if x['class'].casefold()==cat[key]['class']];dlg=Gallery(self,'选择'+('被动技能' if kind=='passives' else '主动技能'),pool,cat[key]['id'])
-        if dlg.exec()==QDialog.Accepted:cat[key]['id']=dlg.selected;self.changed();self.build_editor()
+        cat = self.cats[self.selected]
+        chosen = cat.get(key) or {'class':'empty','id':None}
+        pool = DATA.get(kind, [])
+        if kind != 'diseases':
+            pool = [entry for entry in pool if entry['class'].casefold()==chosen['class']]
+        dlg = Gallery(self, '选择'+SKILL_SLOTS[key]['label'], pool, chosen['id'])
+        if dlg.exec()==QDialog.Accepted:
+            cat[key] = {'class':'disorder' if kind=='diseases' else chosen['class'], 'id':dlg.selected}
+            self.changed()
+            self.build_editor()
     def update_set_effect(self,kind,chosen):
         label=self.set_effect_labels.get(kind)
         if label is None:return

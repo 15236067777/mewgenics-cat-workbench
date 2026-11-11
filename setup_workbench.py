@@ -4,6 +4,7 @@ from pathlib import Path
 from contextlib import closing
 from tkinter import filedialog,messagebox
 ROOT=Path(__file__).resolve().parent
+VERSION = '0.1.0-beta.2'
 
 def configure(game,editor,save,overlays=None):
     game=Path(game).resolve();editor=Path(editor).resolve();save=Path(save).resolve()
@@ -54,7 +55,7 @@ def configure(game,editor,save,overlays=None):
     journal_cfg={**cfg,'preparations':str(ROOT/'出征方案'),'saves':[{'name':'同目录存档 1','path':str(save.with_name('steamcampaign01.sav'))},{'name':'同目录存档 2','path':str(save.with_name('steamcampaign02.sav'))},{'name':'当前选择：'+save.name,'path':str(save)}]}
     (ROOT/'journal'/'settings.json').write_text(json.dumps(journal_cfg,ensure_ascii=False,indent=2),encoding='utf-8')
     subprocess.run([sys.executable,'-X','utf8',str(ROOT/'build_assets.py')],cwd=ROOT,check=True)
-    (ROOT/'.configured').write_text('0.1.0-beta.1',encoding='ascii')
+    (ROOT/'.configured').write_text(VERSION,encoding='ascii')
 
 def gui():
     window=tk.Tk();window.title('猫咪出征工作台 · 首次配置');window.geometry('780x300');window.resizable(False,False)
@@ -78,5 +79,8 @@ if __name__=='__main__':
     if sys.version_info[:2]!=(3,13):raise SystemExit('This beta requires Python 3.13 (matching Save Editor 4.2.1).')
     args=argparse.ArgumentParser();args.add_argument('--game');args.add_argument('--editor');args.add_argument('--save');args.add_argument('--overlay',action='append',default=[]);args.add_argument('--reconfigure',action='store_true');options=args.parse_args()
     if options.game and options.editor and options.save:configure(options.game,options.editor,options.save,options.overlay)
-    elif not options.reconfigure and (ROOT/'.configured').exists() and all((ROOT/name).exists() for name in ['settings.json','catalog.json','workbench.json','journal/labels.json']):pass
+    elif not options.reconfigure and (ROOT/'.configured').exists() and all((ROOT/name).exists() for name in ['settings.json','catalog.json','workbench.json','journal/labels.json']):
+        if (ROOT/'.configured').read_text(encoding='ascii').strip() != VERSION:
+            subprocess.run([sys.executable,'-X','utf8',str(ROOT/'build_assets.py')],cwd=ROOT,check=True)
+            (ROOT/'.configured').write_text(VERSION,encoding='ascii')
     elif not gui():sys.exit(1)
