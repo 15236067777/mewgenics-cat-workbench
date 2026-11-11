@@ -8,6 +8,7 @@ from skill_slots import SKILL_SLOTS
 CONFIG=engine.CONFIG
 DATA=json.loads((HERE/'workbench.json').read_text(encoding='utf-8'))
 ITEMS={x['id']:x for x in DATA['items']}
+SKILLS={x['id']:x for kind in ['actives','passives','diseases'] for x in DATA.get(kind,[])}
 SLOTS=['head','face','neck','weapon','trinket']
 PARTS={'texture':'texture','body':'body','head':'head','tail':'tail','leg1':'leg_back_left','leg2':'leg_back_right','arm1':'arm_front_left','arm2':'arm_front_right','lefteye':'eye_left','righteye':'eye_right','lefteyebrow':'eyebrow_left','righteyebrow':'eyebrow_right','leftear':'ear_left','rightear':'ear_right','mouth':'mouth'}
 
@@ -38,6 +39,7 @@ def validate(cats,unlocked,rooms):
                     raise ValueError('请选择疾病列表中的疾病，或留空。')
                 continue
             if skill not in pool or cls not in unlocked or pool[skill]['class'].casefold()!=cls:raise ValueError('技能必须来自所选已解锁职业的技能池。')
+            if selection.get('upgraded') and not pool[skill].get('upgrade'):raise ValueError('该技能没有强化版本，请取消勾选或换一个技能。')
         for slot,key in enumerate(SLOTS):
             gear=cat.get('equipment',{}).get(key)
             if gear and (gear not in ITEMS or ITEMS[gear]['kind']!=key or ITEMS[gear].get('quest')):raise ValueError('装备类型不符，或所选物品属于任务装备。')
@@ -62,7 +64,10 @@ def make_blob(cb,cat,key,day):
         'voice': 'male11' if cat['gender'] == 0 else 'female54',
     })
     for key, spec in SKILL_SLOTS.items():
-        ability = (cat.get(key) or {}).get('id') or 'None'
+        selection = cat.get(key) or {}
+        ability = selection.get('id') or 'None'
+        if selection.get('upgraded') and spec['kind'] == 'actives':
+            ability = (SKILLS.get(selection.get('id')) or {}).get('upgrade', {}).get('id') or ability
         for slot in spec['slots']:
             desired[f'ability_{slot}'] = ability
     parsed = cb.parse_cat_blob_full(blob)
@@ -70,8 +75,14 @@ def make_blob(cb,cat,key,day):
         field.index: desired[field.semantic]
         for field in parsed.string_fields if field.semantic in desired
     })
+    tiers = {slot: 1 for slot in range(10, 14)}
+    for key, spec in SKILL_SLOTS.items():
+        selection = cat.get(key) or {}
+        if spec['kind'] == 'passives' and selection.get('upgraded'):
+            for slot in spec['slots']:
+                tiers[slot] = 2
     for slot in range(10, 14):
-        blob = edit(blob, cb.apply_passive_tier_edit, slot, 1)
+        blob = edit(blob, cb.apply_passive_tier_edit, slot, tiers[slot])
     blob=edit(blob,cb.apply_personality_edits,libido=1.0,sexuality=0.0,lover_key=0,hater_key=0,aggression=0.0,sociability=1.0,mood=1.0,affinity=1.0)
     blob=edit(blob,cb.apply_unretire);name=cat.get('name','').strip() or engine.draw_name(random.SystemRandom(),cat['gender']);blob=edit(blob,cb.apply_name_edit,name)
     detail=engine.api()[0].parse_cat_details(blob);assert detail['base_stats']==[7]*7 and not detail['retired']

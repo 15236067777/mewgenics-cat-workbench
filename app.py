@@ -67,6 +67,18 @@ class SetCombo(QComboBox):
     def __init__(self,*args):
         super().__init__(*args);self.view().setItemDelegate(SetOptionDelegate(self.view()));self.view().setMinimumWidth(760);self.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon);self.setMinimumContentsLength(9);self.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred);self.setMaxVisibleItems(9)
 
+def skill_blocks(entry,upgraded):
+    if not entry:return ''
+    def block(title,text,active):
+        return '<div style="margin:2px 0 8px"><b style="color:'+('#1a4f9c' if active else '#8b96a3')+'">'+('√ ' if active else '')+title+'</b><br>'+html.escape(text or '').replace('\n','<br>')+'</div>'
+    upgrade=entry.get('upgrade')
+    if not upgrade:return block('效果',entry.get('description',''),True)
+    return block('原效果',entry.get('description',''),not upgraded)+block('强化效果',upgrade.get('description',''),upgraded)
+def entry_html(entry,upgraded):
+    if not entry:return ''
+    pic='<img width="88" height="88" src="'+QUrl.fromLocalFile(image(entry.get('image',''))).toString()+'"><br>' if entry.get('image') else ''
+    body=skill_blocks(entry,upgraded) if entry.get('upgrade') else html.escape(entry.get('description','')).replace('\n','<br>')
+    return '<div style="width:340px">'+pic+'<b>'+html.escape(entry.get('name',''))+'</b><br>'+body+'</div>'
 def tooltip(entry):
     pic='<img width="88" height="88" src="'+QUrl.fromLocalFile(image(entry.get('image',''))).toString()+'"><br>' if entry.get('image') else ''
     return '<div style="width:350px">'+pic+'<b>'+html.escape(entry.get('name',''))+'</b><br>'+html.escape(entry.get('description','')).replace('\n','<br>')+'</div>'
@@ -85,13 +97,15 @@ def default_cat(i):
     return {'enabled':i==0,'name':'','gender':i%2,'room':list(ROOMS)[i%4],'visual':visual,**{key:{'class':'empty','id':None} for key in SKILL_SLOTS},'equipment':{k:None for k in KINDS}}
 
 class Gallery(QDialog):
-    def __init__(self,parent,title,entries,current=None,detail_rows=False):
-        super().__init__(parent);self.setWindowTitle(title);self.resize(1060,760);self.selected=None;self.entries={x['id']:x for x in entries}
+    def __init__(self,parent,title,entries,current=None,detail_rows=False,upgrades=False):
+        super().__init__(parent);self.setWindowTitle(title);self.resize(1060,760);self.selected=None;self.entries={x['id']:x for x in entries};self.upgrades=upgrades;self.upgraded=False;self.upgrade_box=None
         root=QVBoxLayout(self);search=QLineEdit();search.setPlaceholderText('搜索中文名、效果或内部名称');root.addWidget(search)
+        if upgrades:
+            self.upgrade_box=QCheckBox('使用强化版（已升级）');self.upgrade_box.setToolTip('勾选后写入这个技能的强化版本。右边始终同时列出原效果和强化效果。');self.upgrade_box.toggled.connect(self.set_upgraded);root.addWidget(self.upgrade_box)
         split=QSplitter();root.addWidget(split,1);self.list=QListWidget();self.list.setViewMode(QListWidget.IconMode);self.list.setResizeMode(QListWidget.Adjust);self.list.setMovement(QListWidget.Static);self.list.setIconSize(QSize(64,64));self.list.setGridSize(QSize(128,108));self.list.setWordWrap(True);self.list.setMouseTracking(True);split.addWidget(self.list)
         self.preview=QTextBrowser();self.preview.setMinimumWidth(285);split.addWidget(self.preview);split.setSizes([720,300])
         for entry in [{'id':'','name':'空（没有）','description':'不添加此技能或装备。','image':''}]+entries:
-            item=QListWidgetItem(QIcon(image(entry.get('image',''))),entry['name']);item.setData(Qt.UserRole,entry['id']);item.setData(Qt.UserRole+1,'<b>'+html.escape(entry['name'])+'</b><br>'+html.escape(entry['description']).replace('\n','<br>'));item.setSizeHint(QSize(128,108));item.setTextAlignment(Qt.AlignHCenter);item.setToolTip(tooltip(entry));self.list.addItem(item)
+            item=QListWidgetItem(QIcon(image(entry.get('image',''))),entry['name']+(' ＋' if upgrades and entry.get('upgrade') else ''));item.setData(Qt.UserRole,entry['id']);item.setData(Qt.UserRole+1,entry_html(entry,False) if upgrades else '<b>'+html.escape(entry['name'])+'</b><br>'+html.escape(entry['description']).replace('\n','<br>'));item.setSizeHint(QSize(128,108));item.setTextAlignment(Qt.AlignHCenter);item.setToolTip(entry_html(entry,False) if upgrades else tooltip(entry));self.list.addItem(item)
             if entry['id']==(current or ''):self.list.setCurrentItem(item)
         self.list.setUniformItemSizes(True)
         if detail_rows:
@@ -101,7 +115,14 @@ class Gallery(QDialog):
         buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel);buttons.button(QDialogButtonBox.Ok).setText('选择这一个');buttons.button(QDialogButtonBox.Cancel).setText('取消');buttons.accepted.connect(self.choose);buttons.rejected.connect(self.reject);root.addWidget(buttons)
         search.textChanged.connect(lambda text:[self.list.item(j).setHidden(bool(text) and text.casefold() not in (self.list.item(j).text()+' '+self.list.item(j).data(Qt.UserRole)+' '+self.entries.get(self.list.item(j).data(Qt.UserRole),{}).get('description','')).casefold()) for j in range(self.list.count())]);self.show_entry(self.list.currentItem())
     def show_entry(self,item):
-        if item:self.preview.setHtml(tooltip(self.entries.get(item.data(Qt.UserRole),{'name':'空（没有）','description':'不添加此技能或装备。'})))
+        if not item:return
+        entry=self.entries.get(item.data(Qt.UserRole),{'name':'空（没有）','description':'不添加此技能或装备。'})
+        body=entry_html(entry,self.upgraded) if self.upgrades else tooltip(entry)
+        if self.upgrades and entry.get('upgrade'):
+            body='<div style="color:#2b5c9b;font-weight:700;margin-bottom:6px">'+('当前写入：强化版' if self.upgraded else '当前写入：原版')+'</div>'+body
+        self.preview.setHtml(body)
+    def set_upgraded(self,value):
+        self.upgraded=bool(value);self.show_entry(self.list.currentItem())
     def choose(self):
         item=self.list.currentItem()
         if item:self.selected=item.data(Qt.UserRole) or None;self.accept()
@@ -176,7 +197,7 @@ class Window(QMainWindow):
         for i,cat in enumerate(self.cats):
             box=QFrame();box.setObjectName('selectedCard' if i==self.selected else 'catCard');layout=QVBoxLayout(box);check=QCheckBox(f'启用第 {i+1} 只');check.setChecked(cat['enabled']);check.toggled.connect(lambda value,n=i:self.set_enabled(n,value));layout.addWidget(check)
             button=QPushButton(cat.get('name') or f'第 {i+1} 只 · 官方随机名字');button.setIcon(QIcon(self.portrait(cat,82)));button.setIconSize(QSize(82,82));button.setMinimumHeight(86);button.clicked.connect(lambda checked=False,n=i:self.select_cat(n));layout.addWidget(button)
-            names=[SKILLS[x['id']]['name'] for key in SKILL_SLOTS if (x:=cat.get(key)) and x.get('id') in SKILLS];small=QLabel(' / '.join(names) if names else '技能与疾病留空');small.setWordWrap(True);layout.addWidget(small);self.side_layout.addWidget(box)
+            names=[SKILLS[x['id']]['name']+(' ＋' if x.get('upgraded') else '') for key in SKILL_SLOTS if (x:=cat.get(key)) and x.get('id') in SKILLS];small=QLabel(' / '.join(names) if names else '技能与疾病留空');small.setWordWrap(True);layout.addWidget(small);self.side_layout.addWidget(box)
         self.side_layout.addStretch();count=sum(c.get('enabled',True) for c in self.cats);self.generate.setText(f'备份并生成 {count} 只猫咪')
     def set_enabled(self,n,value):self.cats[n]['enabled']=value;self.changed();self.generate.setText(f"备份并生成 {sum(c.get('enabled',True) for c in self.cats)} 只猫咪")
     def select_cat(self,n):self.selected=n;self.build_side();self.build_editor()
@@ -213,8 +234,15 @@ class Window(QMainWindow):
             if entry:button.setIcon(QIcon(image(entry.get('image',''))))
             else:button.setText('选择' if kind=='diseases' or chosen.get('class')!='empty' else '空')
             button.setEnabled(kind=='diseases' or chosen.get('class')!='empty');button.clicked.connect(lambda checked=False,k=key,t=kind:self.pick_skill(k,t));grid.addWidget(button,row,1)
-            text=('<b>'+html.escape(entry['name'])+'</b><br>'+html.escape(entry['description']).replace('\n','<br>')) if entry else ('可选择疾病，也可留空。' if kind=='diseases' else '先选具体技能，或留空。' if chosen.get('class')!='empty' else '没有该技能。')
-            desc=QLabel(text);desc.setTextFormat(Qt.RichText);desc.setWordWrap(True);desc.setToolTip(tooltip(entry) if entry else '');grid.addWidget(desc,row,2);grid.setColumnStretch(2,1)
+            upgraded=bool(chosen.get('upgraded')) and kind!='diseases' and bool((entry or {}).get('upgrade'))
+            tick=QCheckBox('强化');tick.setChecked(upgraded)
+            if kind=='diseases':tick.setEnabled(False);tick.setToolTip('疾病没有强化版本。')
+            elif not entry:tick.setEnabled(False);tick.setToolTip('先选择具体技能，再决定是否使用强化版。')
+            elif not entry.get('upgrade'):tick.setEnabled(False);tick.setToolTip('这个技能没有强化版本。')
+            else:tick.setToolTip('勾选后生成强化版（已升级）：\n'+str(entry['upgrade'].get('description','')))
+            tick.toggled.connect(lambda value,k=key:self.set_upgraded(k,value));grid.addWidget(tick,row,2)
+            text=skill_blocks(entry,upgraded) if entry else ('可选择疾病，也可留空。' if kind=='diseases' else '先选具体技能，或留空。' if chosen.get('class')!='empty' else '没有该技能。')
+            desc=QLabel(text);desc.setTextFormat(Qt.RichText);desc.setWordWrap(True);desc.setToolTip(tooltip(entry) if entry else '');grid.addWidget(desc,row,3);grid.setColumnStretch(3,1)
             if kind!='diseases':skill_layout.addWidget(group)
         skill_layout.addStretch();tabs.addTab(skills,'技能与疾病 · 4 主动 / 2 被动 / 2 疾病')
         body=QWidget();bl=QVBoxLayout(body);bodybutton=QPushButton('打开部位图片面板 · 选择外观与变异');bodybutton.setMinimumHeight(55);bodybutton.clicked.connect(self.customize_body);bl.addWidget(bodybutton)
@@ -241,11 +269,15 @@ class Window(QMainWindow):
         pool = DATA.get(kind, [])
         if kind != 'diseases':
             pool = [entry for entry in pool if entry['class'].casefold()==chosen['class']]
-        dlg = Gallery(self, '选择'+SKILL_SLOTS[key]['label'], pool, chosen['id'])
+        dlg = Gallery(self, '选择'+SKILL_SLOTS[key]['label'], pool, chosen['id'], upgrades=kind!='diseases')
+        if kind!='diseases' and dlg.upgrade_box and chosen.get('upgraded'):dlg.upgrade_box.setChecked(True)
         if dlg.exec()==QDialog.Accepted:
-            cat[key] = {'class':'disorder' if kind=='diseases' else chosen['class'], 'id':dlg.selected}
+            picked = SKILLS.get(dlg.selected) or {}
+            cat[key] = {'class':'disorder' if kind=='diseases' else chosen['class'], 'id':dlg.selected, 'upgraded':bool(kind!='diseases' and dlg.upgraded and picked.get('upgrade'))}
             self.changed()
             self.build_editor()
+    def set_upgraded(self,key,value):
+        cat=self.cats[self.selected];selection=cat.get(key) or {'class':'empty','id':None};selection['upgraded']=bool(value);cat[key]=selection;self.changed();self.build_editor()
     def update_set_effect(self,kind,chosen):
         label=self.set_effect_labels.get(kind)
         if label is None:return

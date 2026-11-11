@@ -86,6 +86,27 @@ for entry in result['actives']:
     entry['combatSummary'] = summary
     entry['description'] = summary + '\n' + entry['description']
 
+for entry in result['actives']:
+    variant_id = entry['id'] + '2'
+    variant = groups['abilities'].get(variant_id)
+    if not isinstance(variant, dict):
+        continue
+    meta = variant.get('meta') if isinstance(variant.get('meta'), dict) else variant
+    summary = combat_summary(variant_id, groups['abilities'], templates)
+    text = tr(meta.get('desc'), '')
+    if not text and '\n' in entry['description']:
+        text = entry['description'].split('\n', 1)[1]
+    entry['upgrade'] = {'id': variant_id, 'name': entry['name'], 'combatSummary': summary, 'description': summary + '\n' + text, 'image': entry['image']}
+for entry in result['passives']:
+    definition = groups['passives'].get(entry['id'])
+    tier = definition.get('2') if isinstance(definition, dict) else None
+    if not isinstance(tier, dict):
+        continue
+    text = tr(tier.get('desc'), '')
+    if not text:
+        continue
+    entry['upgrade'] = {'id': entry['id'], 'tier': 2, 'name': entry['name'], 'description': text, 'image': entry['image']}
+
 import core.cat_blob_editor as cb
 result['diseases'] = []
 disease_frames = ability.labels(ability.sym['PassiveIcon'])
