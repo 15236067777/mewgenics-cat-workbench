@@ -172,6 +172,70 @@ for folder,group in partnames.items():
    if not desc:desc=raw_effect
   combined='\n'.join(x for x in [stats_text,desc] if x) or '无额外属性效果。'
   result['mutations'][folder][str(k)]={'name':tr(b.get('name'),str(k)),'description':combined,'tag':b.get('tag','')}
+STAT_ZH={'str':'力量','dex':'敏捷','con':'体质','int':'智力','spd':'速度','speed':'速度','cha':'魅力','lck':'幸运','shield':'护盾','thorns':'荆棘','divine_shield':'神圣护盾','hp':'生命','mana':'法力','resist':'硬抗'}
+PASSIVE_ZH={'Metal':'金属','Brace':'格挡','SizeScale':'体型','CritChanceUp':'暴击率','PreventSpecificInjury':'免疫特定损伤','WeaponDamageMultiplierBonus':'武器伤害倍率','AddSelfStatusToWeapons':'武器附加状态','AddStatusToBasicAttack':'普通攻击附加状态','InnateElement':'固有元素','MeleeRevengeDamage':'近战反击伤害','ExtraAttack':'额外攻击','ExtraMove':'额外移动','CounterAttack':'反击','Flying':'飞行','Regen':'再生'}
+ITEM_NAME_ZH={'PersuasionDevice_Fixed':'说服装置','MageCollar':'法师项圈','MetalPlate':'金属板','HuntersPatch':'猎手眼罩','AngelicAura':'天使光环','CoinBag':'钱袋','SamsonsChains':'参孙锁链','Banana':'香蕉皮','Slime':'黏液','WesternHat':'西部帽','Poncho':'斗篷','AtomicMark':'原子印记','Pebble':'小石子','Dreadlocks':'脏辫','BabyHair':'胎毛','BulbHead':'灯泡头','MuggerMask':'劫匪面罩','NecromancerMask':'死灵法师面具','TinkererHat':'工匠帽','ButcherMask':'屠户面具','PsychicMask':'灵能士面具','JesterHat':'小丑帽','MonkMask':'武僧面具','DruidNeck':'德鲁伊项饰','TerminatorCoolGlasses2':'终结者墨镜·二型','SuperDunceCap':'超级笨蛋帽','LoansharksFedora':'放贷人软呢帽','Rabiesface':'狂犬脸','Bug':'虫子','D6':'六面骰'}
+for ident,name in list(ITEM_NAME_ZH.items()):ITEM_NAME_ZH.setdefault(ident+'_Terminator',name+'（终结者）')
+ACTIVE_NAME_ZH={'SuperCrateBox':'超级木箱','Ping':'叮'}
+def effect_line(source):
+ if not isinstance(source,dict):return ''
+ parts=[]
+ for key,value in source.items():
+  if key not in STAT_ZH:continue
+  try:amount=float(value)
+  except (TypeError,ValueError):continue
+  parts.append(STAT_ZH[key]+(' +' if amount>=0 else ' ')+('%g'%amount))
+ return '、'.join(parts)
+def merged_definition(definition):
+ merged={}
+ if not isinstance(definition,dict):return merged
+ tier=definition.get('1') if isinstance(definition.get('1'),dict) else {}
+ merged.update(definition);merged.update(tier)
+ for stats in [definition.get('stats'),tier.get('stats')]:
+  if isinstance(stats,dict):merged.update(stats)
+ return merged
+def describe_definition(definition,ability_names):
+ if not isinstance(definition,dict):return ''
+ merged=merged_definition(definition)
+ lines=[]
+ line=effect_line(merged)
+ if line:lines.append(line)
+ for key,value in (merged.get('passives') or {}).items():
+  label=PASSIVE_ZH.get(key)
+  if not label:continue
+  detail=''
+  if not isinstance(value,dict) and str(value) not in ('','1'):
+   raw=str(value);detail=STAT_ZH.get(raw,'') or (raw if re.fullmatch(r'-?(?:\d+(?:\.\d+)?|\.\d+)%?',raw) else '')
+  if key=='PreventSpecificInjury' and detail:lines.append('免疫'+detail+'损伤')
+  else:lines.append(label+(' '+detail if detail else ''))
+ if definition.get('cursed')=='true':lines.append('诅咒物品')
+ if definition.get('parasite')=='true':lines.append('寄生虫物品')
+ if definition.get('degrade_after_adventure')=='false':lines.append('出征不会损耗')
+ if isinstance(definition.get('durability'),str):lines.append('耐久 '+definition['durability'])
+ ability=definition.get('ability')
+ if isinstance(ability,str):
+  label=ability_names.get(ability) or ''
+  if label and not re.search(r'[A-Za-z]',label):lines.append('使用技能：'+label)
+  elif ability in groups['abilities']:
+   attack=combat_summary(ability,groups['abilities'],templates)
+   if attack:lines.append('攻击：'+attack)
+ return '\n'.join(lines)
+ability_names={}
+for ident,definition in groups['abilities'].items():
+ if isinstance(definition,dict):
+  meta=definition.get('meta') if isinstance(definition.get('meta'),dict) else definition
+  ability_names[ident]=tr(meta.get('name') or definition.get('name'),ident)
+for entry in result['actives']:
+ entry['name']=ACTIVE_NAME_ZH.get(entry['id'],entry['name'])
+ if '未提供' in entry['description']:entry['description']=describe_definition(groups['abilities'].get(entry['id']),ability_names) or '游戏没有给这个技能写文字说明。'
+for entry in result['passives']+result['diseases']:
+ if '未提供' in entry['description']:entry['description']=describe_definition(groups['passives'].get(entry['id']),ability_names) or '游戏没有给这个技能写文字说明。'
+for entry in result['items']:
+ if entry['name']==entry['id'] or entry['name']=='D6':entry['name']=ITEM_NAME_ZH.get(entry['id'],ITEM_NAME_ZH.get(entry['name'],entry['name']))
+ if '未提供' in entry['description']:entry['description']=describe_definition(groups['items'].get(entry['id']),ability_names) or {'head':'头部饰品','face':'面部饰品','neck':'颈部饰品','weapon':'武器','trinket':'饰品'}.get(entry.get('kind'),'物品')+'，没有额外属性。'
+for entry in result['sets']:
+ if '未提供' in entry.get('description',''):entry['description']=effect_line(sets.get(entry['id'])) or '游戏没有写套装效果。'
+
 def zh_fix(text):
  if not isinstance(text,str):return text
  text=text.replace('10% chance to cancel actions.','10% 几率抵消行动。').replace('Deja Vu will go away when this cat returns to the house.','猫回到家后，既视感会消失。').replace('Give a familiar +1 divineshield.','给跟班 +1 神圣护盾。').replace('Bleed 1 on basic attack','普通攻击时施加 1 层流血')
