@@ -1,4 +1,4 @@
-﻿"""F3 助手启动器：崩溃时把 traceback 写到 F3助手崩溃.txt，方便排查。"""
+"""F3 助手启动器：崩溃时把 traceback 写到 F3助手崩溃.txt，方便排查。"""
 import pathlib, sys, traceback
 
 ROOT = pathlib.Path(__file__).resolve().parent

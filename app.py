@@ -8,7 +8,7 @@ from PySide6.QtGui import QIcon,QPixmap,QDesktopServices,QPainter,QColor,QTextDo
 from PySide6.QtWidgets import QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QLabel,QPushButton,QCheckBox,QComboBox,QLineEdit,QTabWidget,QSplitter,QScrollArea,QDialog,QListWidget,QListWidgetItem,QAbstractItemView,QTextBrowser,QDialogButtonBox,QMessageBox,QFileDialog,QFrame,QGroupBox,QToolTip,QStyledItemDelegate,QStyle,QSizePolicy
 import core.cat_blob_editor as cb,core.cat_renderer as renderer,core.i18n as i18n
 import ui.gui_cat_customize_dialog as customize
-from skill_slots import SKILL_SLOTS
+from skill_slots import SKILL_SLOTS,MAX_CATS
 CONFIG=json.loads((ROOT/'settings.json').read_text(encoding='utf-8-sig'))
 DATA=json.loads((ROOT/'workbench.json').read_text(encoding='utf-8-sig'))
 BASE=json.loads((ROOT/'catalog.json').read_text(encoding='utf-8-sig'))
@@ -164,11 +164,11 @@ class Window(QMainWindow):
     def __init__(self):
         super().__init__();self.setWindowTitle('喵喵的结合 · 自定义猫咪出征工作台');self.resize(1380,930);self.setMinimumSize(1120,800);self.cats=[default_cat(i) for i in range(4)];self.selected=0;self.tab_index=0;self.info={'unlocked':['colorless','fighter','hunter','mage','tank'],'rooms':list(ROOMS)[:4]};self.loading=False;self.process=None
         try:
-            saved=json.loads((ROOT/'当前草稿.json').read_text(encoding='utf-8'));self.cats=saved['cats'] if len(saved.get('cats',[]))==4 else self.cats
+            saved=json.loads((ROOT/'当前草稿.json').read_text(encoding='utf-8'));self.cats=saved['cats'] if 1<=len(saved.get('cats',[]))<=MAX_CATS else self.cats
         except Exception:pass
         central=QWidget();self.setCentralWidget(central);root=QVBoxLayout(central);root.setContentsMargins(22,18,22,18)
         title=QLabel('自定义猫咪 · 出征工作台');title.setObjectName('heading');root.addWidget(title)
-        description=QLabel('基础属性全 7  ·  最多配置 4 只，可启用 1～4 只  ·  职业与技能不受存档解锁限制  ·  悬停查看效果');root.addWidget(description)
+        description=QLabel('基础属性全 7  ·  左侧可加多只自定义猫（最多 '+str(MAX_CATS)+' 只），启用几只就生成几只  ·  职业与技能不受存档解锁限制  ·  悬停查看效果');root.addWidget(description)
         toolbar=QHBoxLayout();root.addLayout(toolbar);self.title=QLineEdit('我的出征方案');self.title.setPlaceholderText('给这次配置起个名字');toolbar.addWidget(self.title,1)
         for text,fn in [('保存方案',self.save_preset),('载入方案',self.load_preset),('查看出征日记',self.open_journal),('刷新存档',lambda:self.call({'action':'status'},self.status_received)),('解锁全部职业与技能',self.unlock_all),('NPC 交猫直接完成',self.donate_all)]:
             b=QPushButton(text);b.clicked.connect(fn);toolbar.addWidget(b)
@@ -196,13 +196,24 @@ class Window(QMainWindow):
         image=renderer.render_cat_image(self.visual(cat),size);return QPixmap.fromImage(image) if image is not None else QPixmap()
     def build_side(self):
         self.clear_layout(self.side_layout)
+        tools=QHBoxLayout();plus=QPushButton('＋ 新增一只');plus.setToolTip(f'再加一只自定义猫（最多 {MAX_CATS} 只），启用后会一起生成。');plus.clicked.connect(self.add_cat);tools.addWidget(plus)
+        minus=QPushButton('－ 删除这只');minus.setToolTip('删除当前选中的这一只配置。');minus.clicked.connect(self.remove_cat);minus.setEnabled(len(self.cats)>1);tools.addWidget(minus);self.side_layout.addLayout(tools)
         for i,cat in enumerate(self.cats):
-            box=QFrame();box.setObjectName('selectedCard' if i==self.selected else 'catCard');layout=QVBoxLayout(box);check=QCheckBox(f'启用第 {i+1} 只');check.setChecked(cat['enabled']);check.toggled.connect(lambda value,n=i:self.set_enabled(n,value));layout.addWidget(check)
+            box=QFrame();box.setObjectName('selectedCard' if i==self.selected else 'catCard');layout=QVBoxLayout(box);layout.setContentsMargins(8,6,8,8);layout.setSpacing(4);check=QCheckBox(f'启用第 {i+1} 只');check.setChecked(cat['enabled']);check.toggled.connect(lambda value,n=i:self.set_enabled(n,value));layout.addWidget(check)
             button=QPushButton(cat.get('name') or f'第 {i+1} 只 · 官方随机名字');button.setIcon(QIcon(self.portrait(cat,82)));button.setIconSize(QSize(82,82));button.setMinimumHeight(86);button.clicked.connect(lambda checked=False,n=i:self.select_cat(n));layout.addWidget(button)
             names=[SKILLS[x['id']]['name']+(' ＋' if x.get('upgraded') else '') for key in SKILL_SLOTS if (x:=cat.get(key)) and x.get('id') in SKILLS];small=QLabel(' / '.join(names) if names else '技能与疾病留空');small.setWordWrap(True);layout.addWidget(small);self.side_layout.addWidget(box)
         self.side_layout.addStretch();count=sum(c.get('enabled',True) for c in self.cats);self.generate.setText(f'备份并生成 {count} 只猫咪')
     def set_enabled(self,n,value):self.cats[n]['enabled']=value;self.changed();self.generate.setText(f"备份并生成 {sum(c.get('enabled',True) for c in self.cats)} 只猫咪")
     def select_cat(self,n):self.selected=n;self.build_side();self.build_editor()
+    def add_cat(self):
+        if len(self.cats)>=MAX_CATS:QMessageBox.information(self,'已经到上限',f'最多 {MAX_CATS} 只。');return
+        cat=default_cat(len(self.cats));cat['enabled']=True;cat['name']=''
+        for key in SKILL_SLOTS:cat[key]={'class':'empty','id':None}
+        self.cats.append(cat);self.selected=len(self.cats)-1;self.changed();self.build_side();self.build_editor()
+        self.status.setText(f'已新增第 {len(self.cats)} 只，配置好再点生成。')
+    def remove_cat(self):
+        if len(self.cats)<=1:return
+        index=self.selected;self.cats.pop(index);self.selected=max(0,min(index,len(self.cats)-1));self.changed();self.build_side();self.build_editor()
     def build_editor(self):
         self.loading=True;self.clear_layout(self.editor_layout);cat=self.cats[self.selected]
         head=QHBoxLayout();portrait=QLabel();portrait.setPixmap(self.portrait(cat,128));portrait.setFixedSize(138,138);head.addWidget(portrait)
@@ -290,7 +301,7 @@ class Window(QMainWindow):
     def set_filter(self,kind,chosen):
         self.cats[self.selected].setdefault('setFilters',{})[kind]=chosen;self.update_set_effect(kind,chosen);self.changed()
     def pick_item(self,kind):
-        cat=self.cats[self.selected];filter=cat.get('setFilters',{}).get(kind,'all');pool=[x for x in DATA['items'] if x['kind']==kind and x.get('image') and not x.get('quest') and (filter=='all' or filter=='loose' and not x['sets'] or filter in x['sets'])];dlg=Gallery(self,'选择'+KINDS[kind],pool,cat['equipment'].get(kind),detail_rows=True)
+        cat=self.cats[self.selected];filter=cat.get('setFilters',{}).get(kind,'all');pool=[dict(x,name=x['name']+('【任务】' if x.get('quest') else '')) for x in DATA['items'] if x['kind']==kind and x.get('image') and (filter=='all' or filter=='loose' and not x['sets'] or filter in x['sets'])];dlg=Gallery(self,'选择'+KINDS[kind]+'（含任务/支线道具）',pool,cat['equipment'].get(kind),detail_rows=True)
         if dlg.exec()==QDialog.Accepted:cat['equipment'][kind]=dlg.selected;self.changed();self.build_editor()
     def mutation_summary(self,cat):
         mapping={'body':('身体','body'),'head':('头部','head'),'tail':('尾巴','tail'),'leg_back_left':('左后腿','leg'),'leg_back_right':('右后腿','leg'),'arm_front_left':('左前腿','leg'),'arm_front_right':('右前腿','leg'),'ear_left':('左耳','ear'),'ear_right':('右耳','ear'),'eye_left':('左眼','eye'),'eye_right':('右眼','eye'),'eyebrow_left':('左眉','eyebrow'),'eyebrow_right':('右眉','eyebrow'),'mouth':('嘴巴','mouth_closed'),'texture':('毛皮','texture')};lines=[]
@@ -370,8 +381,8 @@ class Window(QMainWindow):
         filename,_=QFileDialog.getOpenFileName(self,'载入方案',str(ROOT/'方案模板'),'猫咪方案 (*.json)')
         if not filename:return
         try:
-            saved=json.loads(Path(filename).read_text(encoding='utf-8-sig'));cats=saved['cats'];assert 1<=len(cats)<=4
-            self.cats=cats+[default_cat(i) for i in range(len(cats),4)];self.title.setText(saved.get('title','我的出征方案'));self.build_side();self.build_editor();self.changed()
+            saved=json.loads(Path(filename).read_text(encoding='utf-8-sig'));cats=saved['cats'];assert 1<=len(cats)<=MAX_CATS
+            self.cats=cats;self.selected=0;self.title.setText(saved.get('title','我的出征方案'));self.build_side();self.build_editor();self.changed()
         except Exception as e:QMessageBox.information(self,'方案无法载入',str(e))
     def open_journal(self):
         exe=Path(CONFIG['journal']).parents[1]/'MewRunJournal.exe'

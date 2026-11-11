@@ -4,6 +4,8 @@ The first passive keeps its original key so older drafts and presets load intact
 Active skills have both a current slot and an inherited/base slot in the save.
 """
 
+MAX_CATS = 20
+
 SKILL_SLOTS = {
     'active1': {'label': '主动技能 1', 'kind': 'actives', 'slots': (2, 6)},
     'active2': {'label': '主动技能 2', 'kind': 'actives', 'slots': (3, 7)},

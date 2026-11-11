@@ -4,7 +4,7 @@ from contextlib import closing
 HERE=Path(__file__).resolve().parent
 sys.path.insert(0,str(HERE))
 import cat_engine as engine
-from skill_slots import SKILL_SLOTS
+from skill_slots import SKILL_SLOTS,MAX_CATS
 CONFIG=engine.CONFIG
 DATA=json.loads((HERE/'workbench.json').read_text(encoding='utf-8'))
 ITEMS={x['id']:x for x in DATA['items']}
@@ -25,7 +25,7 @@ def validate(cats,unlocked,rooms):
         for kind in ['actives', 'passives', 'diseases']
     }
     enabled=[x for x in cats if x.get('enabled',True)]
-    if not 1<=len(enabled)<=4:raise ValueError('请启用 1～4 只猫咪。')
+    if not 1<=len(enabled)<=MAX_CATS:raise ValueError(f'请启用 1～{MAX_CATS} 只猫咪。')
     for cat in enabled:
         if cat.get('room') not in rooms:raise ValueError('所选房间尚未开放。')
         if cat.get('gender') not in [0,1]:raise ValueError('请选择公猫或母猫。')
@@ -42,7 +42,7 @@ def validate(cats,unlocked,rooms):
             if selection.get('upgraded') and not pool[skill].get('upgrade'):raise ValueError('该技能没有强化版本，请取消勾选或换一个技能。')
         for slot,key in enumerate(SLOTS):
             gear=cat.get('equipment',{}).get(key)
-            if gear and (gear not in ITEMS or ITEMS[gear]['kind']!=key or ITEMS[gear].get('quest')):raise ValueError('装备类型不符，或所选物品属于任务装备。')
+            if gear and (gear not in ITEMS or ITEMS[gear]['kind']!=key):raise ValueError('装备类型不符。')
         visual=cat.get('visual') or {}
         if any(not isinstance(visual.get(field),int) or not -2<=visual[field]<=2000 for field in PARTS.values()):raise ValueError('部位配置无效，请重新选择外观。')
     return enabled

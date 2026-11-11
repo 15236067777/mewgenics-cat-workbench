@@ -2,7 +2,7 @@
 
 **Windows 公开测试版 / Public beta — v0.1.0-beta.2**
 
-配置 1～4 只基础属性全 7 的猫咪，挑选技能、部位变异、装备和套装，并把配置关联到实际出征记录。出征人数可以少于配置人数。
+配置 1～20 只基础属性全 7 的猫咪（左侧「＋ 新增一只」可继续添加），挑选技能、部位变异、装备和套装，并把配置关联到实际出征记录。出征人数可以少于配置人数。
 
 This is an unofficial Chinese-language desktop companion for Mewgenics. It edits an offline local save, generates its art/catalogs from your own installation, and records expeditions locally. It is not affiliated with the game or Save Editor authors.
 
@@ -55,7 +55,7 @@ dotnet publish journal/RunJournal.csproj -c Release -o journal
 ## 使用流程
 
 1. 在游戏中回家、保存，**退出游戏并关闭存档编辑器**。
-2. 打开工作台。左侧勾选本次启用的 1～4 只猫，逐只配置。名字留空会从官方中文名字池抽取。
+2. 打开工作台。左侧勾选本次启用的猫（可用「＋ 新增一只」加到最多 20 只），逐只配置。名字留空会从官方中文名字池抽取。
 3. 如需清理，先使用独立清理按钮并确认；生成不会自动清理旧猫。
 4. 点击生成。程序备份原存档，在副本上修改、校验，最后替换选中的存档。
 5. 生成后打开出征日记，保持日记开启，再进入游戏出征。
