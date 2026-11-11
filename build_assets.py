@@ -172,6 +172,42 @@ for folder,group in partnames.items():
    if not desc:desc=raw_effect
   combined='\n'.join(x for x in [stats_text,desc] if x) or '无额外属性效果。'
   result['mutations'][folder][str(k)]={'name':tr(b.get('name'),str(k)),'description':combined,'tag':b.get('tag','')}
+def zh_fix(text):
+ if not isinstance(text,str):return text
+ text=text.replace('10% chance to cancel actions.','10% 几率抵消行动。').replace('Deja Vu will go away when this cat returns to the house.','猫回到家后，既视感会消失。').replace('Give a familiar +1 divineshield.','给跟班 +1 神圣护盾。').replace('Bleed 1 on basic attack','普通攻击时施加 1 层流血')
+ text=text.replace('{aux_cat_name}','某只猫').replace('{str_aux_passive_name}','随机被动').replace('{str_aux_passive_desc}','对应效果').replace('{str_aux_active_name}','随机主动').replace('{str_aux_active_desc}','对应效果').replace('{str_aux_item_desc}','随机物品说明').replace('{str_aux}','该属性').replace('{aux}','N').replace('{v0}','N')
+ text=re.sub(r'\{[A-Za-z_0-9]+\}','',text)
+ for source,target in [('divineshield','神圣护盾'),('Shield','护盾'),('shield','护盾'),('STR','力量'),('DEX','敏捷'),('CON','体质'),('INT','智力'),('SPD','速度'),('CHA','魅力'),('LCK','幸运'),('HP','生命'),('Dodge','闪避'),('Bleed','流血'),('Poison','中毒'),('Thorns','荆棘'),('champion','精英'),('elite','精英'),('Boss','首领'),('AI','电脑'),('comfort','舒适'),('stimulation','刺激'),('appeal','吸引力')]:
+  text=re.sub(r'(?<![A-Za-z_])'+source+r'(?![A-Za-z_])',target,text)
+ text=re.sub(r'(?<![0-9])\.(?=\d)','0.',text)
+ for source,target in [('floor(','向下取整('),('ceil(','向上取整('),('max(','取较大值('),('min(','取较小值('),('clamp(','限制('),('level','等级'),('*','×')]:
+  text=text.replace(source,target)
+ lines=[]
+ for line in text.split('\n'):
+  line=re.sub(r'[ \t]+',' ',line).strip()
+  simplified=re.sub(r'[\s，,；;、]+','',line)
+  if not simplified:continue
+  if re.fullmatch(r'[-–—\s]*(随机被动|随机主动|随机物品说明|对应效果|该属性)[-–—\s]*(随机被动|随机主动|随机物品说明|对应效果|该属性)?[-–—\s]*',line):continue
+  if any(simplified==kept[0] for kept in lines):continue
+  lines.append((simplified,line))
+ return '\n'.join(line for _,line in lines)
+
+for entry in result['actives']+result['passives']+result['diseases']:
+ entry['name']=zh_fix(entry.get('name',''))
+ entry['description']=zh_fix(entry.get('description',''))
+ if 'combatSummary' in entry:entry['combatSummary']=zh_fix(entry['combatSummary'])
+ upgrade=entry.get('upgrade')
+ if isinstance(upgrade,dict):
+  upgrade['description']=zh_fix(upgrade.get('description',''))
+  if 'combatSummary' in upgrade:upgrade['combatSummary']=zh_fix(upgrade['combatSummary'])
+for entry in result['items']+result['sets']+result['classes']:
+ entry['name']=zh_fix(entry.get('name',''))
+ entry['description']=zh_fix(entry.get('description',''))
+for folder in result['mutations'].values():
+ for effect in folder.values():
+  effect['name']=zh_fix(effect.get('name',''))
+  effect['description']=zh_fix(effect.get('description',''))
+
 missing={kind:sum(not x['image'] for x in result[kind]) for kind in ['actives','passives','diseases','items','classes']}
 (ROOT/'workbench.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8');(ROOT/'asset-report.json').write_text(json.dumps({'icons':stats['rendered'],'missing':missing,'errors':stats['missing'][:20]},ensure_ascii=False,indent=2),encoding='utf-8')
 print(json.dumps({'icons':stats['rendered'],'missing':missing,'mutations':{k:len(v) for k,v in result['mutations'].items()}},ensure_ascii=False))
