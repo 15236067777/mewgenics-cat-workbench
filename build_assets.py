@@ -26,14 +26,17 @@ def tr(key,default=''):
  row=texts.get(key,{});t=row.get('zh-cn') or row.get('en') or default
  t=re.sub(r'\[img:([^\]]+)\]',lambda m:{'str':'力量','dex':'敏捷','con':'体质','int':'智力','spd':'速度','cha':'魅力','lck':'幸运','hp':'生命','mana':'法力'}.get(m[1],m[1]),t)
  return re.sub(r'\[/?[a-z]+(?::[^\]]*)?\]','',t).replace('\\n','\n').replace('\ufeff','').replace('\u200b','')
-groups={k:{} for k in ['abilities','passives','items','mutations','classes']};quest=set()
+groups={k:{} for k in ['abilities','passives','items','mutations','classes']};quest=set();quest_side=set();quest_main=set()
 for name in index:
  if not name.endswith('.gon'):continue
  kind=next((k for k in groups if name.startswith('data/'+k+'/')),None)
  if kind:
   try:parsed=parse_gon(raw(name).decode('utf-8-sig'));groups[kind].update(parsed)
   except Exception:continue
-  if kind=='items' and any(x in name for x in ['beanies_quest','legacy_quest']):quest.update(parsed)
+  if kind=='items':
+   if 'beanies_quest' in name:quest_side.update(parsed)
+   if 'legacy_quest' in name:quest_main.update(parsed)
+   if 'beanies_quest' in name or 'legacy_quest' in name:quest.update(parsed)
 sets=parse_gon(raw('data/item_setbonuses.gon').decode('utf-8-sig'))
 defs={};ability=Swf(raw('swfs/ability_icons.swf'),defs,'a',False);parts=Swf(raw('swfs/catparts.swf'),defs,'p',False);ui=Swf(raw('swfs/ui.swf'),defs,'u',False)
 icons=ROOT/'images';icons.mkdir(exist_ok=True);stats={'rendered':0,'missing':[]};cache={}
@@ -135,7 +138,7 @@ for k,b in groups['items'].items():
  except:frame=0
  img=icon(parts,parts.sym.get(symbol),frame-1,'item-'+k) if frame>0 else ''
  ss=b.get('set',[]);ss=[ss] if isinstance(ss,str) else ss
- result['items'].append({'id':k,'name':tr(b.get('name'),k),'description':tr(b.get('desc'),'游戏未提供文字说明。'),'kind':kind,'sets':ss,'image':img,'quest':k in quest})
+ result['items'].append({'id':k,'name':tr(b.get('name'),k),'description':tr(b.get('desc'),'游戏未提供文字说明。'),'kind':kind,'sets':ss,'image':img,'quest':k in quest,'questKind':'支线' if k in quest_side else ('主线' if k in quest_main else ('任务' if k in quest else ''))})
 for k,b in sets.items():
  if not isinstance(b,dict):continue
  members=[i for i in result['items'] if k in i['sets']]

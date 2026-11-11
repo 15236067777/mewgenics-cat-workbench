@@ -1,4 +1,4 @@
-import sys,os,json,copy,base64,dataclasses,tempfile,html,datetime,re,subprocess
+import sys,os,json,copy,base64,dataclasses,tempfile,html,datetime,re,subprocess,shutil
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent
 sys.path.insert(0,str(ROOT))
@@ -10,6 +10,7 @@ import core.cat_blob_editor as cb,core.cat_renderer as renderer,core.i18n as i18
 import ui.gui_cat_customize_dialog as customize
 from skill_slots import SKILL_SLOTS,MAX_CATS
 CONFIG=json.loads((ROOT/'settings.json').read_text(encoding='utf-8-sig'))
+DRAFT_LOCKED=os.environ.get('WORKBENCH_NO_DRAFT')=='1'
 DATA=json.loads((ROOT/'workbench.json').read_text(encoding='utf-8-sig'))
 BASE=json.loads((ROOT/'catalog.json').read_text(encoding='utf-8-sig'))
 CLASSES={x['id']:x for x in DATA['classes']}
@@ -164,7 +165,8 @@ class Window(QMainWindow):
     def __init__(self):
         super().__init__();self.setWindowTitle('喵喵的结合 · 自定义猫咪出征工作台');self.resize(1380,930);self.setMinimumSize(1120,800);self.cats=[default_cat(i) for i in range(4)];self.selected=0;self.tab_index=0;self.info={'unlocked':['colorless','fighter','hunter','mage','tank'],'rooms':list(ROOMS)[:4]};self.loading=False;self.process=None
         try:
-            saved=json.loads((ROOT/'当前草稿.json').read_text(encoding='utf-8'));self.cats=saved['cats'] if 1<=len(saved.get('cats',[]))<=MAX_CATS else self.cats
+            if not DRAFT_LOCKED:
+                saved=json.loads((ROOT/'当前草稿.json').read_text(encoding='utf-8'));self.cats=saved['cats'] if 1<=len(saved.get('cats',[]))<=MAX_CATS else self.cats
         except Exception:pass
         central=QWidget();self.setCentralWidget(central);root=QVBoxLayout(central);root.setContentsMargins(22,18,22,18)
         title=QLabel('自定义猫咪 · 出征工作台');title.setObjectName('heading');root.addWidget(title)
@@ -175,8 +177,8 @@ class Window(QMainWindow):
         self.helper_button=QPushButton('启动 F3 助手');self.helper_button.setToolTip('常驻补满 NPC 捐献（等于交够猫，不消耗猫）。不随机启动，需要时点这里。');self.helper_button.clicked.connect(self.toggle_helper);toolbar.addWidget(self.helper_button)
         self.refresh_helper_button()
         self.status=QLabel('正在读取当前存档…');self.status.setWordWrap(True);root.addWidget(self.status)
-        split=QSplitter();root.addWidget(split,1);side=QWidget();self.side_layout=QVBoxLayout(side);side.setMinimumWidth(255);side.setMaximumWidth(335);split.addWidget(side)
-        self.editor=QWidget();self.editor_layout=QVBoxLayout(self.editor);scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setWidget(self.editor);split.addWidget(scroll);split.setSizes([280,1060])
+        split=QSplitter();root.addWidget(split,1);side=QWidget();self.side_layout=QVBoxLayout(side);side.setMinimumWidth(330);side.setMaximumWidth(470);split.addWidget(side)
+        self.editor=QWidget();self.editor_layout=QVBoxLayout(self.editor);scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setWidget(self.editor);split.addWidget(scroll);split.setSizes([380,1000])
         bottom=QHBoxLayout();root.addLayout(bottom);self.clear=QPushButton('备份并清空猫咪及非任务装备');self.clear.setObjectName('danger');self.clear.clicked.connect(self.clear_save);bottom.addWidget(self.clear);bottom.addStretch();self.generate=QPushButton('备份并生成已启用的猫咪');self.generate.setObjectName('primary');self.generate.setMinimumHeight(46);self.generate.clicked.connect(self.generate_cats);bottom.addWidget(self.generate)
         footer=QLabel('写入前请回家、保存并退出游戏。生成前自动备份；任务装备和消耗品受保护。生成方案会关联实际出征队伍，人数不限于 4 只。');footer.setWordWrap(True);root.addWidget(footer)
         self.draft_timer=QTimer(self);self.draft_timer.setSingleShot(True);self.draft_timer.setInterval(450);self.draft_timer.timeout.connect(self.write_draft)
@@ -184,7 +186,12 @@ class Window(QMainWindow):
     def changed(self,*args):
         if not self.loading:self.draft_timer.start()
     def write_draft(self):
-        (ROOT/'当前草稿.json').write_text(json.dumps({'title':self.title.text(),'cats':self.cats},ensure_ascii=False,indent=2),encoding='utf-8');self.build_side()
+        if DRAFT_LOCKED:return
+        target=ROOT/'当前草稿.json'
+        try:
+            if target.exists():shutil.copy2(target,ROOT/'当前草稿.bak.json')
+        except OSError:pass
+        target.write_text(json.dumps({'title':self.title.text(),'cats':self.cats},ensure_ascii=False,indent=2),encoding='utf-8');self.build_side()
     def clear_layout(self,layout):
         while layout.count():
             item=layout.takeAt(0)
@@ -263,7 +270,7 @@ class Window(QMainWindow):
         equipment=QWidget();el=QGridLayout(equipment);el.setContentsMargins(4,4,4,4);el.setSpacing(8)
         self.set_effect_labels={}
         for number,(kind,label) in enumerate(KINDS.items()):
-            box=QGroupBox(label);grid=QGridLayout(box);grid.setContentsMargins(8,9,8,8);grid.setSpacing(5);sets=SetCombo();sets.addItem('全部套装 / 散件','all');sets.addItem('仅散件','loose')
+            box=QGroupBox(label);grid=QGridLayout(box);grid.setContentsMargins(8,9,8,8);grid.setSpacing(5);sets=SetCombo();sets.addItem('全部装备','all');sets.addItem('仅散件（无套装、非任务）','loose');sets.addItem('支线任务道具','side');sets.addItem('主线任务道具','main')
             valid=[s for s in DATA['sets'] if any(ITEMS.get(k,{}).get('kind')==kind for k in s['members'])]
             for suit in valid:
                 shown=dict(suit,description=f"{suit['required']} 件套效果：\n"+suit['description']);sets.addItem(QIcon(image(suit['image'])),suit['name']+' ｜ '+str(suit['required'])+'件：'+' '.join(suit['description'].split()),suit['id']);sets.setItemData(sets.count()-1,tooltip(shown),Qt.ToolTipRole)
@@ -300,8 +307,19 @@ class Window(QMainWindow):
         else:label.setText('展开套装列表，名称后直接显示效果。');label.setToolTip('')
     def set_filter(self,kind,chosen):
         self.cats[self.selected].setdefault('setFilters',{})[kind]=chosen;self.update_set_effect(kind,chosen);self.changed()
+    def item_matches(self,entry,chosen):
+        kind_of_quest=entry.get('questKind') or ''
+        if chosen=='all':return True
+        if chosen=='loose':return not entry['sets'] and not entry.get('quest')
+        if chosen=='side':return kind_of_quest=='支线'
+        if chosen=='main':return kind_of_quest=='主线'
+        if chosen=='quest':return bool(entry.get('quest'))
+        return chosen in entry['sets']
     def pick_item(self,kind):
-        cat=self.cats[self.selected];filter=cat.get('setFilters',{}).get(kind,'all');pool=[dict(x,name=x['name']+('【任务】' if x.get('quest') else '')) for x in DATA['items'] if x['kind']==kind and x.get('image') and (filter=='all' or filter=='loose' and not x['sets'] or filter in x['sets'])];dlg=Gallery(self,'选择'+KINDS[kind]+'（含任务/支线道具）',pool,cat['equipment'].get(kind),detail_rows=True)
+        cat=self.cats[self.selected];filter=cat.get('setFilters',{}).get(kind,'all')
+        labels={'支线':'【支线】','主线':'【主线】','任务':'【任务】'}
+        pool=[dict(x,name=x['name']+(labels.get(x.get('questKind') or '',labels['任务'] if x.get('quest') else ''))) for x in DATA['items'] if x['kind']==kind and x.get('image') and self.item_matches(x,filter)]
+        dlg=Gallery(self,'选择'+KINDS[kind],pool,cat['equipment'].get(kind),detail_rows=True)
         if dlg.exec()==QDialog.Accepted:cat['equipment'][kind]=dlg.selected;self.changed();self.build_editor()
     def mutation_summary(self,cat):
         mapping={'body':('身体','body'),'head':('头部','head'),'tail':('尾巴','tail'),'leg_back_left':('左后腿','leg'),'leg_back_right':('右后腿','leg'),'arm_front_left':('左前腿','leg'),'arm_front_right':('右前腿','leg'),'ear_left':('左耳','ear'),'ear_right':('右耳','ear'),'eye_left':('左眼','eye'),'eye_right':('右眼','eye'),'eyebrow_left':('左眉','eyebrow'),'eyebrow_right':('右眉','eyebrow'),'mouth':('嘴巴','mouth_closed'),'texture':('毛皮','texture')};lines=[]
