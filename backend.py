@@ -4,7 +4,7 @@ from contextlib import closing
 HERE=Path(__file__).resolve().parent
 sys.path.insert(0,str(HERE))
 import cat_engine as engine
-from skill_slots import SKILL_SLOTS,MAX_CATS
+from skill_slots import SKILL_SLOTS,MAX_CATS,FLAG_LABELS
 CONFIG=engine.CONFIG
 DATA=json.loads((HERE/'workbench.json').read_text(encoding='utf-8'))
 ITEMS={x['id']:x for x in DATA['items']}
@@ -186,18 +186,24 @@ def donate_direct(backup=True):
             raise
     return {'ok':False,'changed':False,'message':'存档被游戏占用，稍后自动重试：'+last}
 
-MAIN_DELIVERIES={
-    'leech':{'name':'腐臭水蛭 → 白骨墓园 · 搏动动脉','tokens':{'MeatWorldQuest_Leech':1,'mapflag_ThrobbingArteryDone':1}},
-    'gristle':{'name':'搏动软骨 → 洞窟 · 肉墙','tokens':{'MeatWorldQuest_Gristle':1,'mapflag_WallOfFleshDone':1}},
-}
-def deliver_main(se,stage,keys):
-    keys=[key for key in keys if key in MAIN_DELIVERIES]
-    if not keys:raise ValueError('没有选择要完成的主线交付。')
-    tokens={}
-    for key in keys:tokens.update(MAIN_DELIVERIES[key]['tokens'])
-    if {'leech','gristle'}<=set(keys):tokens['mapflag_MeatWorldUnlocked']=1
+MAIN_DELIVERIES={row['id']:row for row in DATA.get('deliveries',[])}
+def deliver_main(se,stage,items):
+    chosen=[item for item in (items or []) if item in MAIN_DELIVERIES]
+    if not chosen:raise ValueError('没有选择要完成的主线交付。')
     with closing(sqlite3.connect(stage)) as c:before=engine.snap(c)
     existing=set(before['properties'])
+    tokens={}
+    for item in chosen:tokens.update(MAIN_DELIVERIES[item].get('tokens') or {})
+    satisfied=set(tokens)|existing
+    unlocked=[]
+    for item in chosen:
+        row=MAIN_DELIVERIES[item]
+        flags=[flag for flag in (row.get('unlockFlags') or []) if flag not in tokens]
+        if not flags:continue
+        if all(need in satisfied for need in (row.get('requires') or [])):
+            for flag in flags:tokens[flag]=1;unlocked.append(flag)
+    if not tokens:
+        return {'deliveries':chosen,'message':'这些交付在游戏里只消耗道具、没有独立标记，没有改动。'}
     updates={key:value for key,value in tokens.items() if key in existing}
     inserts={key:value for key,value in tokens.items() if key not in existing}
     se.save_all_changes(stage,prop_updates=updates or None,prop_inserts=inserts or None)
@@ -205,14 +211,14 @@ def deliver_main(se,stage,keys):
         props=se.get_properties(c);after=engine.snap(c)
         for key,value in tokens.items():assert props.get(key)==value,key
         assert before['cats']==after['cats'] and before['furniture']==after['furniture'] and before['winning_teams']==after['winning_teams']
-        assert {k:v for k,v in before['files'].items()}=={k:v for k,v in after['files'].items()}
+        assert before['files']==after['files']
         ignore={'save_editor_name','save_editor_version','save_editor_tables_touched'}
         assert {k:v for k,v in before['properties'].items() if k not in tokens and k not in ignore}=={k:v for k,v in after['properties'].items() if k not in tokens and k not in ignore}
         assert c.execute('pragma integrity_check').fetchone()[0]=='ok'
-    names='、'.join(MAIN_DELIVERIES[key]['name'] for key in keys)
-    message=f'已完成主线交付：{names}；'
-    message+='两半都交齐，肉世界（Meat World）已解锁。' if 'mapflag_MeatWorldUnlocked' in tokens else '另一半交完还会解锁肉世界。'
-    return {'deliveries':keys,'message':message}
+    names='、'.join(MAIN_DELIVERIES[item]['name'] for item in chosen)
+    message=f'已完成主线交付：{names}。'
+    if unlocked:message+=' 同步解锁：'+'、'.join(FLAG_LABELS.get(flag,flag) for flag in unlocked)+'。'
+    return {'deliveries':chosen,'message':message}
 
 def operate(req):
     action=req.get('action','status')

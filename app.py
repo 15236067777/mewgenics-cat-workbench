@@ -8,7 +8,7 @@ from PySide6.QtGui import QIcon,QPixmap,QDesktopServices,QPainter,QColor,QTextDo
 from PySide6.QtWidgets import QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QLabel,QPushButton,QCheckBox,QComboBox,QLineEdit,QTabWidget,QSplitter,QScrollArea,QDialog,QListWidget,QListWidgetItem,QAbstractItemView,QTextBrowser,QDialogButtonBox,QMessageBox,QFileDialog,QFrame,QGroupBox,QToolTip,QStyledItemDelegate,QStyle,QSizePolicy
 import core.cat_blob_editor as cb,core.cat_renderer as renderer,core.i18n as i18n
 import ui.gui_cat_customize_dialog as customize
-from skill_slots import SKILL_SLOTS,MAX_CATS
+from skill_slots import SKILL_SLOTS,MAX_CATS,FLAG_LABELS
 CONFIG=json.loads((ROOT/'settings.json').read_text(encoding='utf-8-sig'))
 DRAFT_LOCKED=os.environ.get('WORKBENCH_NO_DRAFT')=='1'
 DATA=json.loads((ROOT/'workbench.json').read_text(encoding='utf-8-sig'))
@@ -353,14 +353,36 @@ class Window(QMainWindow):
         answer=QMessageBox.question(self,'NPC 交猫直接完成','将把各 NPC 的捐献进度直接补到目标值，等于你已经交够了猫和物品。游戏里再去找他们（布恩县的豆博士等）就能领对应奖励，过程中不会消耗任何猫咪。\n只改 NPC 进度，不动猫咪、装备和金币；操作前自动备份。\n\n请确认游戏已保存并退出。继续？',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
         if answer==QMessageBox.Yes:self.call({'action':'donate'},self.donated)
     def deliver_main_quest(self):
-        box=QMessageBox(self);box.setWindowTitle('完成主线交付');box.setText('直接完成主线道具交付（相当于已经把道具送到地点交掉）。\n\n· 腐臭水蛭 → 白骨墓园 · 搏动动脉\n· 搏动软骨 → 洞窟 · 肉墙\n\n两半都交齐会解锁肉世界（Meat World）。只改任务标记，不动猫咪、装备和金币，写入前自动备份。\n\n请确认游戏已保存并退出。')
-        leech=box.addButton('只交腐臭水蛭',QMessageBox.AcceptRole)
-        both=box.addButton('两个都交（解锁肉世界）',QMessageBox.AcceptRole)
-        box.addButton('取消',QMessageBox.RejectRole)
-        box.exec()
-        clicked=box.clickedButton()
-        if clicked is leech:self.call({'action':'mainquest','deliveries':['leech']},self.delivered_main)
-        elif clicked is both:self.call({'action':'mainquest','deliveries':['leech','gristle']},self.delivered_main)
+        rows=DATA.get('deliveries') or []
+        if not rows:QMessageBox.information(self,'没有清单','目录里没有主线交付数据，请刷新存档后再试。');return
+        dialog=QDialog(self);dialog.setWindowTitle('完成主线交付');dialog.resize(560,520)
+        layout=QVBoxLayout(dialog)
+        layout.addWidget(QLabel('勾选要直接完成的交付（等于已经把道具送到对应地点交掉）：\n只写任务标记，不动猫咪、装备和金币；写入前自动备份。请先保存并退出游戏。'))
+        listing=QListWidget()
+        for row in rows:
+            needs=row.get('requires') or []
+            flags=row.get('unlockFlags') or []
+            hint=''
+            if flags:hint='　解锁：'+'、'.join(FLAG_LABELS.get(flag,flag) for flag in flags)
+            if needs:hint+='（需另一半）'
+            if not flags and not row.get('tokens'):hint='　只消耗道具，没有独立标记'
+            item=QListWidgetItem(f"{row['name']} → {row['target']}{hint}")
+            item.setData(Qt.UserRole,row['id']);item.setFlags(item.flags()|Qt.ItemIsUserCheckable);item.setCheckState(Qt.Unchecked)
+            listing.addItem(item)
+        layout.addWidget(listing,1)
+        buttons=QHBoxLayout();layout.addLayout(buttons)
+        all_on=QPushButton('全选');all_on.clicked.connect(lambda:[listing.item(i).setCheckState(Qt.Checked) for i in range(listing.count())]);buttons.addWidget(all_on)
+        all_off=QPushButton('全不选');all_off.clicked.connect(lambda:[listing.item(i).setCheckState(Qt.Unchecked) for i in range(listing.count())]);buttons.addWidget(all_off)
+        buttons.addStretch()
+        confirm=QPushButton('完成勾选的交付');confirm.setObjectName('primary');buttons.addWidget(confirm)
+        cancel=QPushButton('取消');buttons.addWidget(cancel)
+        cancel.clicked.connect(dialog.reject)
+        def apply():
+            picked=[listing.item(i).data(Qt.UserRole) for i in range(listing.count()) if listing.item(i).checkState()==Qt.Checked]
+            if not picked:QMessageBox.information(dialog,'没有勾选','请先勾选至少一项。');return
+            dialog.accept();self.call({'action':'mainquest','deliveries':picked},self.delivered_main)
+        confirm.clicked.connect(apply)
+        dialog.exec()
     def delivered_main(self,result):
         QMessageBox.information(self,'已完成','主线交付：'+result.get('message','')+'\n\n备份位置：'+result['backup']);self.call({'action':'status'},self.status_received)
     def donated(self,result):
