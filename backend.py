@@ -38,7 +38,7 @@ def validate(cats,unlocked,rooms):
                 if skill not in pool:
                     raise ValueError('请选择疾病列表中的疾病，或留空。')
                 continue
-            if skill not in pool or cls not in unlocked or pool[skill]['class'].casefold()!=cls:raise ValueError('技能必须来自所选已解锁职业的技能池。')
+            if skill not in pool or pool[skill]['class'].casefold()!=cls:raise ValueError('技能必须来自所选职业的技能池。')
             if selection.get('upgraded') and not pool[skill].get('upgrade'):raise ValueError('该技能没有强化版本，请取消勾选或换一个技能。')
         for slot,key in enumerate(SLOTS):
             gear=cat.get('equipment',{}).get(key)
@@ -114,32 +114,54 @@ def clear_stage(se,cb,c):
     c.commit();assert not engine.owncats(se,c)
     return {'clearedCats':len(owned),'removedEquipment':removed}
 
+def unlock_all(se,stage):
+    with closing(sqlite3.connect(stage)) as c:
+        before=engine.snap(c);categories=se.get_all_unlocked_categories(c)
+        cache_counts={'cats':len(before['cats'])}
+    class_ids=sorted(set(categories[0])|{entry['id'].capitalize() for entry in DATA['classes']})
+    active_ids=sorted(set(categories[1])|{entry['id'] for entry in DATA['actives']})
+    passive_ids=sorted(set(categories[2])|{entry['id'] for entry in DATA['passives']})
+    se.save_all_changes(stage,unlock_updates={0:class_ids,1:active_ids,2:passive_ids})
+    with closing(sqlite3.connect(stage)) as c:
+        after_categories=se.get_all_unlocked_categories(c);after=engine.snap(c)
+        assert set(class_ids)<=set(after_categories[0]) and set(active_ids)<=set(after_categories[1]) and set(passive_ids)<=set(after_categories[2])
+        assert all(categories[index]==after_categories[index] for index in range(3,len(categories)))
+        ignore={'save_editor_name','save_editor_version','save_editor_tables_touched'}
+        assert {k:v for k,v in before['properties'].items() if k not in ignore}=={k:v for k,v in after['properties'].items() if k not in ignore}
+        assert {k:v for k,v in before['files'].items() if k!='unlocks'}=={k:v for k,v in after['files'].items() if k!='unlocks'}
+        assert before['cats']==after['cats'] and before['furniture']==after['furniture'] and before['winning_teams']==after['winning_teams']
+        assert len(after['cats'])==cache_counts['cats']
+        assert c.execute('pragma integrity_check').fetchone()[0]=='ok'
+    return {'unlockedClasses':len(after_categories[0]),'unlockedActives':len(after_categories[1]),'unlockedPassives':len(after_categories[2])}
+
 def operate(req):
     action=req.get('action','status')
     if action=='status':return status()
     engine.closed();se,cb,hu=engine.api();sp=Path(CONFIG['save']);info=status()
     if info['onAdventure']:raise ValueError('请先结束冒险回家、保存并退出游戏。')
     cats=validate(req.get('cats',[]),info['unlocked'],info['rooms']) if action=='generate' else []
-    if action not in ['generate','clear']:raise ValueError('不支持的操作。')
+    if action not in ['generate','clear','unlock']:raise ValueError('不支持的操作。')
     oldhash=hashlib.sha256(sp.read_bytes()).hexdigest();stamp=datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f');backup=Path(CONFIG['backupRoot'])/stamp;backup.mkdir(parents=True)
     with closing(sqlite3.connect(sp.as_uri()+'?mode=ro',uri=True)) as src,closing(sqlite3.connect(backup/sp.name)) as dst:src.backup(dst)
     fd,temp=tempfile.mkstemp(prefix='cat-workbench-',suffix='.sav',dir=sp.parent);os.close(fd);stage=Path(temp);shutil.copy2(backup/sp.name,stage)
     made=[];result={}
     try:
-        with closing(sqlite3.connect(stage)) as c:
-            before=engine.snap(c);day=int(se.get_properties(c)['current_day'])
-            if action=='clear':result=clear_stage(se,cb,c)
-            else:
-                hs=before['files']['house_state']
-                for config in cats:
-                    key=int(c.execute('select coalesce(max(key),0)+1 from cats').fetchone()[0]);blob,name=make_blob(cb,config,key,day)
-                    actual=c.execute('insert into cats(data) values(?)',(blob,)).lastrowid;assert actual==key
-                    hs=se.add_cat_to_house_state(hs,key,room=config['room'],position=(random.uniform(-4,4),1.0,3.0));made.append({'key':key,'name':name,'config':config})
-                c.execute("update files set data=? where key='house_state'",(hs,));se._maybe_grow_pedigree_after_cat_insert(c);c.commit()
-            after=engine.snap(c)
-            for table in ['furniture','winning_teams','properties']:assert before[table]==after[table],table
-            if action=='generate':assert all(after['cats'][key]==blob for key,blob in before['cats'].items())
-            assert c.execute('pragma integrity_check').fetchone()[0]=='ok'
+        if action=='unlock':result=unlock_all(se,stage)
+        else:
+            with closing(sqlite3.connect(stage)) as c:
+                before=engine.snap(c);day=int(se.get_properties(c)['current_day'])
+                if action=='clear':result=clear_stage(se,cb,c)
+                else:
+                    hs=before['files']['house_state']
+                    for config in cats:
+                        key=int(c.execute('select coalesce(max(key),0)+1 from cats').fetchone()[0]);blob,name=make_blob(cb,config,key,day)
+                        actual=c.execute('insert into cats(data) values(?)',(blob,)).lastrowid;assert actual==key
+                        hs=se.add_cat_to_house_state(hs,key,room=config['room'],position=(random.uniform(-4,4),1.0,3.0));made.append({'key':key,'name':name,'config':config})
+                    c.execute("update files set data=? where key='house_state'",(hs,));se._maybe_grow_pedigree_after_cat_insert(c);c.commit()
+                after=engine.snap(c)
+                for table in ['furniture','winning_teams','properties']:assert before[table]==after[table],table
+                if action=='generate':assert all(after['cats'][key]==blob for key,blob in before['cats'].items())
+                assert c.execute('pragma integrity_check').fetchone()[0]=='ok'
         if se.validate_save_integrity(stage):raise ValueError('存档校验失败，已停止写入。')
         engine.closed()
         if hashlib.sha256(sp.read_bytes()).hexdigest()!=oldhash:raise ValueError('存档在操作期间发生变化，请重新读取。')
@@ -151,7 +173,8 @@ def operate(req):
         record={'id':stamp,'title':req.get('title','自定义出征方案'),'created':datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).isoformat(),'save':str(sp),'cats':made}
         folder=HERE/'出征方案';folder.mkdir(exist_ok=True);(folder/(stamp+'.json')).write_text(json.dumps(record,ensure_ascii=False,indent=2),encoding='utf-8')
         result['message']=f'已生成 {len(made)} 只自定义全7猫，出征方案已保存。'
-    else:result['message']=f"已清空 {result['clearedCats']} 只家中猫咪及 {result['removedEquipment']} 件非任务装备；任务物品、消耗品和历史记录保留。"
+    elif action=='clear':result['message']=f"已清空 {result['clearedCats']} 只家中猫咪及 {result['removedEquipment']} 件非任务装备；任务物品、消耗品和历史记录保留。"
+    else:result['message']=f"已解锁 {result['unlockedClasses']} 个职业、{result['unlockedActives']} 个主动技能和 {result['unlockedPassives']} 个被动技能；猫咪、装备和进度未变。"
     (backup/'操作记录.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8');return result
 
 if __name__=='__main__':

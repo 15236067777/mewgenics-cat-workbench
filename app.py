@@ -168,9 +168,9 @@ class Window(QMainWindow):
         except Exception:pass
         central=QWidget();self.setCentralWidget(central);root=QVBoxLayout(central);root.setContentsMargins(22,18,22,18)
         title=QLabel('自定义猫咪 · 出征工作台');title.setObjectName('heading');root.addWidget(title)
-        description=QLabel('基础属性全 7  ·  最多配置 4 只，可启用 1～4 只  ·  技能、部位、装备均可自选  ·  悬停查看效果');root.addWidget(description)
+        description=QLabel('基础属性全 7  ·  最多配置 4 只，可启用 1～4 只  ·  职业与技能不受存档解锁限制  ·  悬停查看效果');root.addWidget(description)
         toolbar=QHBoxLayout();root.addLayout(toolbar);self.title=QLineEdit('我的出征方案');self.title.setPlaceholderText('给这次配置起个名字');toolbar.addWidget(self.title,1)
-        for text,fn in [('保存方案',self.save_preset),('载入方案',self.load_preset),('查看出征日记',self.open_journal),('刷新存档',lambda:self.call({'action':'status'},self.status_received))]:
+        for text,fn in [('保存方案',self.save_preset),('载入方案',self.load_preset),('查看出征日记',self.open_journal),('刷新存档',lambda:self.call({'action':'status'},self.status_received)),('解锁全部职业与技能',self.unlock_all)]:
             b=QPushButton(text);b.clicked.connect(fn);toolbar.addWidget(b)
         self.status=QLabel('正在读取当前存档…');self.status.setWordWrap(True);root.addWidget(self.status)
         split=QSplitter();root.addWidget(split,1);side=QWidget();self.side_layout=QVBoxLayout(side);side.setMinimumWidth(255);side.setMaximumWidth(335);split.addWidget(side)
@@ -227,8 +227,8 @@ class Window(QMainWindow):
                 group=QGroupBox(label);grid=QGridLayout(group);grid.setContentsMargins(8,8,8,8);grid.setSpacing(5);row=0
                 combo=HoverCombo();combo.setIconSize(QSize(30,30));combo.addItem('空（没有该技能）','empty')
                 for cls in DATA['classes']:
-                    if cls['id'] in self.info['unlocked']:
-                        combo.addItem(QIcon(image(cls['image'])),cls['name'],cls['id']);combo.setItemData(combo.count()-1,tooltip(cls),Qt.ToolTipRole)
+                    locked = cls['id'] not in self.info['unlocked']
+                    combo.addItem(QIcon(image(cls['image'])),cls['name']+('（未解锁）' if locked else ''),cls['id']);combo.setItemData(combo.count()-1,tooltip(cls),Qt.ToolTipRole)
                 combo.view().setMouseTracking(True);combo.setCurrentIndex(max(0,combo.findData(chosen.get('class','empty'))));combo.currentIndexChanged.connect(lambda i,k=key,c=combo:self.set_skill_class(k,c.itemData(i)));combo.setFixedWidth(170);grid.addWidget(combo,row,0)
             entry=SKILLS.get(chosen.get('id'));button=QPushButton();button.setObjectName('skillSquare');button.setFixedSize(68,68);button.setIconSize(QSize(58,58));button.setToolTip(tooltip(entry) if entry else '选择该职业的具体技能')
             if entry:button.setIcon(QIcon(image(entry.get('image',''))))
@@ -312,7 +312,12 @@ class Window(QMainWindow):
         except Exception as e:self.status.setText(str(e));QMessageBox.information(self,'操作未完成',str(e))
         process.deleteLater()
     def status_received(self,info):
-        self.info=info;self.status.setText(f"当前存档 · 家中 {info['count']} 只猫 · 已解锁 {len(info['unlocked'])} 个职业 · "+('正在冒险，请先回家保存退出' if info['onAdventure'] else '编辑配置后，退出游戏再生成'));self.build_editor()
+        self.info=info;self.status.setText(f"当前存档 · 家中 {info['count']} 只猫 · 已解锁 {len(info['unlocked'])}/{len(DATA['classes'])} 个职业 · "+('正在冒险，请先回家保存退出' if info['onAdventure'] else '编辑配置后，退出游戏再生成'));self.build_editor()
+    def unlock_all(self):
+        answer=QMessageBox.question(self,'解锁所有职业与技能','将把全部职业、全部主动技能和被动技能写入当前存档的解锁表。\n只改解锁表，不动猫咪、装备和冒险进度；操作前自动备份。\n\n请确认游戏已保存并退出。继续解锁？',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+        if answer==QMessageBox.Yes:self.call({'action':'unlock'},self.unlocked)
+    def unlocked(self,result):
+        QMessageBox.information(self,'已解锁',result['message']+'\n\n备份位置：'+result['backup']);self.call({'action':'status'},self.status_received)
     def clear_save(self):
         answer=QMessageBox.question(self,'确认备份并清理','将清空当前存档家中所有猫咪和所有非任务装备。\n任务物品、消耗品和猫咪历史保留；操作前自动备份。\n\n请确认游戏已保存并退出。继续清理？',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
         if answer==QMessageBox.Yes:self.call({'action':'clear'},self.operation_done)
