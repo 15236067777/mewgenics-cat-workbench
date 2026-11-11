@@ -192,31 +192,31 @@ class Window(QMainWindow):
         room.setCurrentIndex(max(0,room.findData(cat['room'])));room.currentIndexChanged.connect(lambda i:self.update_cat('room',room.itemData(i)));row.addWidget(room);hint=QLabel('全 7 指基础属性；变异和装备仍会产生额外加成。');hint.setWordWrap(True);fields.addWidget(hint);self.editor_layout.addLayout(head)
         tabs=QTabWidget();self.editor_layout.addWidget(tabs);tabs.currentChanged.connect(lambda n:setattr(self,'tab_index',n) if not self.loading else None)
         skills=QWidget();skill_layout=QVBoxLayout(skills)
-        diseases=QWidget();disease_layout=QVBoxLayout(diseases)
+        disease_box=None;disease_grid=None
         for key, spec in SKILL_SLOTS.items():
             label, kind = spec['label'], spec['kind']
-            group=QGroupBox(label);grid=QGridLayout(group);grid.setContentsMargins(8,8,8,8);grid.setSpacing(5)
             chosen=cat.get(key) or {'class':'empty','id':None}
-            if kind == 'diseases':
-                category = QLabel('疾病 / 障碍')
-                category.setFixedWidth(170)
-                grid.addWidget(category,0,0)
+            if kind=='diseases':
+                if disease_box is None:
+                    hint=QLabel('疾病 / 障碍：和技能一起选，最多 2 个，也可以留空。疾病按游戏规则影响猫咪的属性与行为。')
+                    hint.setWordWrap(True);hint.setStyleSheet('font-weight:700;color:#2b5c9b;padding:10px 2px 0;');skill_layout.addWidget(hint)
+                    disease_box=QGroupBox('疾病 / 障碍 · 可选 2 个');disease_grid=QGridLayout(disease_box);disease_grid.setContentsMargins(8,8,8,8);disease_grid.setSpacing(5);skill_layout.addWidget(disease_box)
+                grid=disease_grid;row=grid.rowCount();slot=QLabel(label);slot.setFixedWidth(170);grid.addWidget(slot,row,0)
             else:
+                group=QGroupBox(label);grid=QGridLayout(group);grid.setContentsMargins(8,8,8,8);grid.setSpacing(5);row=0
                 combo=HoverCombo();combo.setIconSize(QSize(30,30));combo.addItem('空（没有该技能）','empty')
                 for cls in DATA['classes']:
                     if cls['id'] in self.info['unlocked']:
                         combo.addItem(QIcon(image(cls['image'])),cls['name'],cls['id']);combo.setItemData(combo.count()-1,tooltip(cls),Qt.ToolTipRole)
-                combo.view().setMouseTracking(True);combo.setCurrentIndex(max(0,combo.findData(chosen.get('class','empty'))));combo.currentIndexChanged.connect(lambda i,k=key,c=combo:self.set_skill_class(k,c.itemData(i)));combo.setFixedWidth(170);grid.addWidget(combo,0,0)
+                combo.view().setMouseTracking(True);combo.setCurrentIndex(max(0,combo.findData(chosen.get('class','empty'))));combo.currentIndexChanged.connect(lambda i,k=key,c=combo:self.set_skill_class(k,c.itemData(i)));combo.setFixedWidth(170);grid.addWidget(combo,row,0)
             entry=SKILLS.get(chosen.get('id'));button=QPushButton();button.setObjectName('skillSquare');button.setFixedSize(68,68);button.setIconSize(QSize(58,58));button.setToolTip(tooltip(entry) if entry else '选择该职业的具体技能')
             if entry:button.setIcon(QIcon(image(entry.get('image',''))))
             else:button.setText('选择' if kind=='diseases' or chosen.get('class')!='empty' else '空')
-            button.setEnabled(kind=='diseases' or chosen.get('class')!='empty');button.clicked.connect(lambda checked=False,k=key,t=kind:self.pick_skill(k,t));grid.addWidget(button,0,1)
+            button.setEnabled(kind=='diseases' or chosen.get('class')!='empty');button.clicked.connect(lambda checked=False,k=key,t=kind:self.pick_skill(k,t));grid.addWidget(button,row,1)
             text=('<b>'+html.escape(entry['name'])+'</b><br>'+html.escape(entry['description']).replace('\n','<br>')) if entry else ('可选择疾病，也可留空。' if kind=='diseases' else '先选具体技能，或留空。' if chosen.get('class')!='empty' else '没有该技能。')
-            desc=QLabel(text);desc.setTextFormat(Qt.RichText);desc.setWordWrap(True);desc.setToolTip(tooltip(entry) if entry else '');grid.addWidget(desc,0,2);grid.setColumnStretch(2,1)
-            target_layout = disease_layout if kind=='diseases' else skill_layout
-            target_layout.addWidget(group)
-        skill_layout.addStretch();tabs.addTab(skills,'技能 · 4 主动 / 2 被动')
-        disease_layout.addStretch();tabs.addTab(diseases,'疾病 · 2')
+            desc=QLabel(text);desc.setTextFormat(Qt.RichText);desc.setWordWrap(True);desc.setToolTip(tooltip(entry) if entry else '');grid.addWidget(desc,row,2);grid.setColumnStretch(2,1)
+            if kind!='diseases':skill_layout.addWidget(group)
+        skill_layout.addStretch();tabs.addTab(skills,'技能与疾病 · 4 主动 / 2 被动 / 2 疾病')
         body=QWidget();bl=QVBoxLayout(body);bodybutton=QPushButton('打开部位图片面板 · 选择外观与变异');bodybutton.setMinimumHeight(55);bodybutton.clicked.connect(self.customize_body);bl.addWidget(bodybutton)
         summary=QLabel(self.mutation_summary(cat));summary.setWordWrap(True);bl.addWidget(summary);bl.addStretch();tabs.addTab(body,'部位 / 变异')
         equipment=QWidget();el=QGridLayout(equipment);el.setContentsMargins(4,4,4,4);el.setSpacing(8)

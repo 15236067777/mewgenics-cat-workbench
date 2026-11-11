@@ -1,5 +1,9 @@
 # Changelog
 
+## 未发布 — 2026-11-11
+
+- 疾病栏并入技能页：2 个疾病／障碍栏紧跟 4 主动、2 被动之后，不再单独占一个页签。
+
 ## 0.1.0-beta.2 — 2026-11-11
 
 - Four optional active skills, two optional class passives and two optional diseases per cat.
