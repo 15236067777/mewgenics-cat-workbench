@@ -134,19 +134,45 @@ def unlock_all(se,stage):
         assert c.execute('pragma integrity_check').fetchone()[0]=='ok'
     return {'unlockedClasses':len(after_categories[0]),'unlockedActives':len(after_categories[1]),'unlockedPassives':len(after_categories[2])}
 
+def donate_complete(stage):
+    import core.npc_progress_parser as npc
+    with closing(sqlite3.connect(stage)) as c:
+        before=engine.snap(c)
+        row=c.execute("select data from files where key='npc_progress'").fetchone()
+    if not row:raise ValueError('这份存档没有 NPC 进度数据。')
+    blob=row[0];data=npc.parse_npc_progress(blob)
+    if not data.counter_editable:raise ValueError('这份存档的 NPC 计数器不可写，已停止。')
+    plan={};report=[]
+    for counter in data.donation_counters:
+        target=int(counter.target or 0)
+        if target<=0 or counter.value>=target:continue
+        plan[counter.npc]=target;report.append({'npc':counter.npc,'quest':counter.quest_name,'from':counter.value,'to':target})
+    if not plan:return {'npcUpdates':[],'message':'所有 NPC 的捐献进度都已经满了，没有改动。'}
+    new_blob=npc.set_npc_donation_counters(blob,plan)
+    values={counter.npc:counter.value for counter in npc.parse_npc_progress(new_blob).donation_counters}
+    for name,target in plan.items():assert values.get(name,0)>=target,name
+    with closing(sqlite3.connect(stage)) as c:
+        c.execute("update files set data=? where key='npc_progress'",(new_blob,));c.commit()
+        after=engine.snap(c)
+        assert {k:v for k,v in before['files'].items() if k!='npc_progress'}=={k:v for k,v in after['files'].items() if k!='npc_progress'}
+        assert before['cats']==after['cats'] and before['properties']==after['properties'] and before['furniture']==after['furniture'] and before['winning_teams']==after['winning_teams']
+        assert c.execute('pragma integrity_check').fetchone()[0]=='ok'
+    return {'npcUpdates':report,'message':'已把 '+'、'.join(f"{item['npc']} {item['to']}/{item['to']}" for item in report)+' 的捐献进度补满；相当于已经交够猫和物品，没有消耗猫咪。'}
+
 def operate(req):
     action=req.get('action','status')
     if action=='status':return status()
     engine.closed();se,cb,hu=engine.api();sp=Path(CONFIG['save']);info=status()
     if info['onAdventure']:raise ValueError('请先结束冒险回家、保存并退出游戏。')
     cats=validate(req.get('cats',[]),info['unlocked'],info['rooms']) if action=='generate' else []
-    if action not in ['generate','clear','unlock']:raise ValueError('不支持的操作。')
+    if action not in ['generate','clear','unlock','donate']:raise ValueError('不支持的操作。')
     oldhash=hashlib.sha256(sp.read_bytes()).hexdigest();stamp=datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f');backup=Path(CONFIG['backupRoot'])/stamp;backup.mkdir(parents=True)
     with closing(sqlite3.connect(sp.as_uri()+'?mode=ro',uri=True)) as src,closing(sqlite3.connect(backup/sp.name)) as dst:src.backup(dst)
     fd,temp=tempfile.mkstemp(prefix='cat-workbench-',suffix='.sav',dir=sp.parent);os.close(fd);stage=Path(temp);shutil.copy2(backup/sp.name,stage)
     made=[];result={}
     try:
         if action=='unlock':result=unlock_all(se,stage)
+        elif action=='donate':result=donate_complete(stage)
         else:
             with closing(sqlite3.connect(stage)) as c:
                 before=engine.snap(c);day=int(se.get_properties(c)['current_day'])
@@ -174,7 +200,7 @@ def operate(req):
         folder=HERE/'出征方案';folder.mkdir(exist_ok=True);(folder/(stamp+'.json')).write_text(json.dumps(record,ensure_ascii=False,indent=2),encoding='utf-8')
         result['message']=f'已生成 {len(made)} 只自定义全7猫，出征方案已保存。'
     elif action=='clear':result['message']=f"已清空 {result['clearedCats']} 只家中猫咪及 {result['removedEquipment']} 件非任务装备；任务物品、消耗品和历史记录保留。"
-    else:result['message']=f"已解锁 {result['unlockedClasses']} 个职业、{result['unlockedActives']} 个主动技能和 {result['unlockedPassives']} 个被动技能；猫咪、装备和进度未变。"
+    elif action=='unlock':result['message']=f"已解锁 {result['unlockedClasses']} 个职业、{result['unlockedActives']} 个主动技能和 {result['unlockedPassives']} 个被动技能；猫咪、装备和进度未变。"
     (backup/'操作记录.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8');return result
 
 if __name__=='__main__':

@@ -170,7 +170,7 @@ class Window(QMainWindow):
         title=QLabel('自定义猫咪 · 出征工作台');title.setObjectName('heading');root.addWidget(title)
         description=QLabel('基础属性全 7  ·  最多配置 4 只，可启用 1～4 只  ·  职业与技能不受存档解锁限制  ·  悬停查看效果');root.addWidget(description)
         toolbar=QHBoxLayout();root.addLayout(toolbar);self.title=QLineEdit('我的出征方案');self.title.setPlaceholderText('给这次配置起个名字');toolbar.addWidget(self.title,1)
-        for text,fn in [('保存方案',self.save_preset),('载入方案',self.load_preset),('查看出征日记',self.open_journal),('刷新存档',lambda:self.call({'action':'status'},self.status_received)),('解锁全部职业与技能',self.unlock_all)]:
+        for text,fn in [('保存方案',self.save_preset),('载入方案',self.load_preset),('查看出征日记',self.open_journal),('刷新存档',lambda:self.call({'action':'status'},self.status_received)),('解锁全部职业与技能',self.unlock_all),('NPC 交猫直接完成',self.donate_all)]:
             b=QPushButton(text);b.clicked.connect(fn);toolbar.addWidget(b)
         self.status=QLabel('正在读取当前存档…');self.status.setWordWrap(True);root.addWidget(self.status)
         split=QSplitter();root.addWidget(split,1);side=QWidget();self.side_layout=QVBoxLayout(side);side.setMinimumWidth(255);side.setMaximumWidth(335);split.addWidget(side)
@@ -318,6 +318,11 @@ class Window(QMainWindow):
         if answer==QMessageBox.Yes:self.call({'action':'unlock'},self.unlocked)
     def unlocked(self,result):
         QMessageBox.information(self,'已解锁',result['message']+'\n\n备份位置：'+result['backup']);self.call({'action':'status'},self.status_received)
+    def donate_all(self):
+        answer=QMessageBox.question(self,'NPC 交猫直接完成','将把各 NPC 的捐献进度直接补到目标值，等于你已经交够了猫和物品。游戏里再去找他们（布恩县的豆博士等）就能领对应奖励，过程中不会消耗任何猫咪。\n只改 NPC 进度，不动猫咪、装备和金币；操作前自动备份。\n\n请确认游戏已保存并退出。继续？',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+        if answer==QMessageBox.Yes:self.call({'action':'donate'},self.donated)
+    def donated(self,result):
+        QMessageBox.information(self,'已完成',result['message']+'\n\n备份位置：'+result['backup']);self.call({'action':'status'},self.status_received)
     def clear_save(self):
         answer=QMessageBox.question(self,'确认备份并清理','将清空当前存档家中所有猫咪和所有非任务装备。\n任务物品、消耗品和猫咪历史保留；操作前自动备份。\n\n请确认游戏已保存并退出。继续清理？',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
         if answer==QMessageBox.Yes:self.call({'action':'clear'},self.operation_done)
