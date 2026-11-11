@@ -1,4 +1,4 @@
-import sys,os,json,copy,base64,dataclasses,tempfile,html,datetime,re
+import sys,os,json,copy,base64,dataclasses,tempfile,html,datetime,re,subprocess
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent
 sys.path.insert(0,str(ROOT))
@@ -172,6 +172,8 @@ class Window(QMainWindow):
         toolbar=QHBoxLayout();root.addLayout(toolbar);self.title=QLineEdit('我的出征方案');self.title.setPlaceholderText('给这次配置起个名字');toolbar.addWidget(self.title,1)
         for text,fn in [('保存方案',self.save_preset),('载入方案',self.load_preset),('查看出征日记',self.open_journal),('刷新存档',lambda:self.call({'action':'status'},self.status_received)),('解锁全部职业与技能',self.unlock_all),('NPC 交猫直接完成',self.donate_all)]:
             b=QPushButton(text);b.clicked.connect(fn);toolbar.addWidget(b)
+        self.helper_button=QPushButton('启动 F3 助手');self.helper_button.setToolTip('常驻补满 NPC 捐献（等于交够猫，不消耗猫）。不随机启动，需要时点这里。');self.helper_button.clicked.connect(self.toggle_helper);toolbar.addWidget(self.helper_button)
+        self.refresh_helper_button()
         self.status=QLabel('正在读取当前存档…');self.status.setWordWrap(True);root.addWidget(self.status)
         split=QSplitter();root.addWidget(split,1);side=QWidget();self.side_layout=QVBoxLayout(side);side.setMinimumWidth(255);side.setMaximumWidth(335);split.addWidget(side)
         self.editor=QWidget();self.editor_layout=QVBoxLayout(self.editor);scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setWidget(self.editor);split.addWidget(scroll);split.setSizes([280,1060])
@@ -323,6 +325,35 @@ class Window(QMainWindow):
         if answer==QMessageBox.Yes:self.call({'action':'donate'},self.donated)
     def donated(self,result):
         QMessageBox.information(self,'已完成',result['message']+'\n\n备份位置：'+result['backup']);self.call({'action':'status'},self.status_received)
+    def helper_pid(self):
+        lock=ROOT/'F3助手.lock'
+        if not lock.exists():return 0
+        try:pid=int(lock.read_text(encoding='utf-8').strip() or 0)
+        except (OSError,ValueError):return 0
+        if not pid:return 0
+        output=subprocess.run(['tasklist','/FI',f'PID eq {pid}','/FO','CSV','/NH'],capture_output=True,text=True,errors='replace').stdout
+        return pid if 'python' in output.lower() else 0
+    def refresh_helper_button(self):
+        if not hasattr(self,'helper_button'):return
+        running=bool(self.helper_pid());self.helper_button.setText('F3 助手运行中 · 点击关闭' if running else '启动 F3 助手')
+        self.helper_button.setObjectName('primary' if running else '')
+        self.helper_button.setStyleSheet('')
+    def toggle_helper(self):
+        pid=self.helper_pid()
+        if pid:
+            if QMessageBox.question(self,'停止 F3 助手','F3 助手正在后台运行（托盘有蓝色 F3 图标）。\n要关掉它吗？关掉后 NPC 捐献不会再自动补满。',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)==QMessageBox.Yes:
+                subprocess.run(['taskkill','/PID',str(pid),'/F'],capture_output=True)
+                (ROOT/'F3助手.lock').unlink(missing_ok=True)
+                self.status.setText('F3 助手已停止。')
+                self.refresh_helper_button()
+            return
+        script=ROOT/'f3_start.py'
+        if not script.exists():QMessageBox.information(self,'找不到助手文件',str(script));return
+        exe=Path(sys.executable)
+        pythonw=exe.with_name('pythonw.exe')
+        subprocess.Popen([str(pythonw if pythonw.exists() else exe),'-X','utf8',str(script)],cwd=str(ROOT),creationflags=0x00000008|0x00000200)
+        self.status.setText('F3 助手已启动：后台常驻，NPC 捐献会一直保持满。')
+        QTimer.singleShot(1500,self.refresh_helper_button)
     def clear_save(self):
         answer=QMessageBox.question(self,'确认备份并清理','将清空当前存档家中所有猫咪和所有非任务装备。\n任务物品、消耗品和猫咪历史保留；操作前自动备份。\n\n请确认游戏已保存并退出。继续清理？',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
         if answer==QMessageBox.Yes:self.call({'action':'clear'},self.operation_done)

@@ -159,6 +159,33 @@ def donate_complete(stage):
         assert c.execute('pragma integrity_check').fetchone()[0]=='ok'
     return {'npcUpdates':report,'message':'已把 '+'、'.join(f"{item['npc']} {item['to']}/{item['to']}" for item in report)+' 的捐献进度补满；相当于已经交够猫和物品，没有消耗猫咪。'}
 
+def donate_direct(backup=True):
+    """游戏运行中也能用的就地补满：只改 npc_progress，写前复制一份备份。"""
+    import core.npc_progress_parser as npc
+    engine.api()
+    sp=Path(CONFIG['save'])
+    if backup:
+        root=Path(CONFIG['backupRoot']);root.mkdir(parents=True,exist_ok=True)
+        target=root/('hotkey-'+datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
+        target.mkdir(parents=True,exist_ok=True);shutil.copy2(sp,target/sp.name)
+    last=''
+    for attempt in range(8):
+        try:
+            with closing(sqlite3.connect(str(sp),timeout=4)) as c:
+                row=c.execute("select data from files where key='npc_progress'").fetchone()
+                if not row:return {'ok':False,'changed':False,'message':'存档里没有 NPC 进度数据。'}
+                data=npc.parse_npc_progress(row[0])
+                plan={counter.npc:int(counter.target) for counter in data.donation_counters if counter.target and counter.value<int(counter.target)}
+                if not plan:return {'ok':True,'changed':False,'message':'NPC 捐献进度已经是满的。'}
+                blob=npc.set_npc_donation_counters(row[0],plan)
+                c.execute("update files set data=? where key='npc_progress'",(blob,));c.commit()
+            return {'ok':True,'changed':True,'message':'已补满 '+'、'.join(f'{name} {value}/{value}' for name,value in plan.items())}
+        except sqlite3.OperationalError as error:
+            last=str(error)
+            if 'locked' in last.lower() or 'busy' in last.lower():time.sleep(1.2);continue
+            raise
+    return {'ok':False,'changed':False,'message':'存档被游戏占用，稍后自动重试：'+last}
+
 def operate(req):
     action=req.get('action','status')
     if action=='status':return status()
